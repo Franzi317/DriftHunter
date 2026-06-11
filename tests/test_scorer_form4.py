@@ -90,3 +90,46 @@ def test_same_day_buys_batch_into_one_signal():
     assert signals[0].trigger_date == date(2024, 3, 5)
     assert "insiders=3" in signals[0].detail
     assert signals[0].score > 4.0  # 3 insiders + log10(90k/25k) + 1.0 CEO bonus
+
+
+def test_second_signal_after_suppression_lapses():
+    # First cluster A(Mar1)+B(Mar4) fires Mar 4 (window {A,B}, both within
+    # 10 bdays). Suppression then lasts until 10 bdays have elapsed since
+    # Mar 4: busday_count(Mar4, Mar19) == 11 >= 10, so suppression has
+    # lapsed by Mar 19.
+    #
+    # At Mar 19, A and B are both >10 bdays away (busday_count(Mar1,Mar19)=12,
+    # busday_count(Mar4,Mar19)=11), so the window is just {D} -> 1 insider,
+    # no fire. At Mar 21, the window is {D,E} (A and B still out of range)
+    # -> 2 insiders, fires.
+    signals = detect_signals(
+        [buy("A", 1), buy("B", 4), buy("D", 19), buy("E", 21)], CFG
+    )
+    assert len(signals) == 2
+    assert signals[0].trigger_date == date(2024, 3, 4)
+    assert signals[1].trigger_date == date(2024, 3, 21)
+    assert "insiders=2" in signals[1].detail
+
+
+def test_issuers_scored_independently():
+    # Two issuers, interleaved input order: each fires its own signal; output
+    # sorted by (trigger_date, ticker).
+    signals = detect_signals(
+        [buy("A", 1, issuer="0000002", ticker="ZZZ"),
+         buy("X", 4, issuer="0000001", ticker="AAA"),
+         buy("B", 5, issuer="0000002", ticker="ZZZ"),
+         buy("Y", 5, issuer="0000001", ticker="AAA")],
+        CFG,
+    )
+    assert [(s.ticker, s.trigger_date) for s in signals] == [
+        ("AAA", date(2024, 3, 5)), ("ZZZ", date(2024, 3, 5)),
+    ]
+
+
+def test_duplicate_insider_in_firing_window_not_double_counted():
+    # A buys twice; C is a second distinct insider -> fires with insiders=2,
+    # but total includes all three buys.
+    signals = detect_signals([buy("A", 1), buy("A", 4), buy("C", 5)], CFG)
+    assert len(signals) == 1
+    assert "insiders=2" in signals[0].detail
+    assert "total=$90,000" in signals[0].detail

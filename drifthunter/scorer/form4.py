@@ -31,6 +31,12 @@ Note on causality: the live system evaluates this same day-batched window as
 of each filing day and enters at the next market open -- there is no
 settling wait. A signal fires the moment its window's conditions are met,
 using only information available as of that filing day.
+
+Complexity note: the window is rebuilt from scratch for each filing date
+(O(k) per date, O(k*m) per issuer for k buys and m distinct filing dates),
+which is acceptable at backtest scale. A sliding-window optimization is
+possible without changing semantics if heavy-tail issuers (very large k)
+make this too slow.
 """
 from __future__ import annotations
 
@@ -72,11 +78,16 @@ def detect_signals(buys: list[InsiderBuy], cfg: Form4Config) -> list[Signal]:
 
             window = [
                 b for b in issuer_buys
+                # 0 <= ... excludes future filings (causality); upper bound is the
+                # trailing window
                 if 0 <= _bdays_between(b.filing_date, d) <= cfg.cluster_window_bdays
             ]
 
             insiders = {w.insider_cik for w in window}
             total = sum(w.value for w in window)
+            # any_ceo (any-size CEO/CFO buy in the window) grants the score bonus
+            # below; the FIRE condition below requires a CEO/CFO buy whose value
+            # is >= ceo_cfo_single_min. Two different predicates by design.
             any_ceo = any(w.is_ceo_cfo for w in window)
             fires = (
                 len(insiders) >= cfg.cluster_min_insiders

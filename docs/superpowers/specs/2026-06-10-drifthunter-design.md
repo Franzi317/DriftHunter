@@ -27,9 +27,11 @@ small-cap illiquidity at institutional size — while being perfectly liquid at
 our size.
 
 **Capital:** under $5,000. **Consequence:** recurring costs must be ~$0
-(free data, no paid feeds, LLM only for alert prose), engineering stays lean,
-and expected profit is honestly modest — this is an edge-validation system that
-scales if it works, not a get-rich machine.
+(free live data, LLM only for alert prose; the single exception is a ~$40
+one-month subscription to a survivorship-bias-free price dataset for the
+Phase 0 backtest — see §3.2), engineering stays lean, and expected profit is
+honestly modest — this is an edge-validation system that scales if it works,
+not a get-rich machine.
 
 ## 2. Non-negotiable design principles
 
@@ -61,18 +63,28 @@ scales if it works, not a get-rich machine.
 | Form 4 history (2006→) | SEC **Insider Transactions Data Sets** (quarterly TSV bundles) | Already structured: submission, non-derivative transaction, reporting-owner tables. No scraping. |
 | SC 13D history | EDGAR daily/quarterly **form index** files + filing **headers** | Header parse only (subject company, filer, date, form type). Document text not needed for deterministic rules. |
 | CIK → ticker | SEC `company_tickers.json` | Plus exchange listing for OTC exclusion. |
-| Prices | yfinance daily OHLCV per event window; SPY as benchmark | Stooq as fallback for tickers missing from Yahoo. |
+| Prices (Phase 0) | **Paid survivorship-bias-free daily OHLCV** (Sharadar or Norgate class, ~$40 for one month); SPY as benchmark | Includes delisted tickers. Subscribe for one month, pull event windows, run study, cancel. yfinance + Stooq are the free fallback if the paid source is unavailable. |
+| Prices (live) | Alpaca market data for quotes/fills; yfinance for outcome tracking | Survivorship bias does not apply to positions actually held. |
 
 ### 3.2 Survivorship bias — first-class treatment
 
-yfinance lacks delisted tickers; small caps are where delistings happen. The
-backtester must:
+Free price sources (yfinance) lack delisted tickers, and small caps are where
+delistings happen — a silent bias of exactly the kind that produced
+EdgeHunter's fake validation AUC. **Primary mitigation: use a paid
+survivorship-bias-free dataset for Phase 0** (one month, ~$40; it includes
+delisted tickers, removing the bias rather than merely measuring it). Budget
+~$40/year thereafter only if re-validating: extending the backtest window,
+changing scorer rules, or investigating a drift alarm each require a fresh
+one-month pull. The live system never needs paid data.
+
+Regardless of source, the backtester must:
 
 - Report **price-coverage rate** per profile (events with usable prices ÷ total
   events).
-- Flag results as suspect if coverage < 80%; attempt Stooq for the gap.
+- Flag results as suspect if coverage < 80% (relevant mainly on the free
+  fallback path; expect ~100% on the paid path).
 - List every uncovered event so the gap is auditable.
-- State the residual bias explicitly in the final report.
+- State any residual bias explicitly in the final report.
 
 ### 3.3 Scorer rules (deterministic, config-driven thresholds)
 
@@ -207,7 +219,8 @@ changed and why. Never tune-until-green.
 - systemd unit, restart-on-failure; nightly SQLite backup
 - Weekly Discord digest: positions, P&L, signal counts, skipped signals with
   reasons, EDGAR poll health, price-feed health
-- Recurring cost target: $0 data, pennies/month LLM
+- Recurring cost target: $0 live data, pennies/month LLM; ~$40 one-time for
+  Phase 0 price data (and ~$40 per re-validation, expected ≤1/year)
 
 ## 8. Out of scope (YAGNI)
 

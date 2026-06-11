@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+docs/superpowers/
 *.pyc
 data/
 .pytest_cache/

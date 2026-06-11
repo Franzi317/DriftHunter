@@ -11,8 +11,9 @@ An event-driven SEC-filing backtest that killed its own strategy — by design.
 ## The verdict, up front
 
 **Phase 0 returned KILL on both signal profiles**, per the go/kill criteria
-pre-committed *before any data was seen*
-(spec [§3.6](docs/superpowers/specs/2026-06-10-drifthunter-design.md#36-phase-0-gokill-criteria-pre-committed)).
+pre-committed *before any data was seen* — the thresholds live frozen in
+[`config.yaml`](config.yaml)'s `gate:` block, and the
+[runbook](docs/phase0-runbook.md) records them being applied unchanged.
 No live trading system was built.
 
 Headline numbers (30bp round-trip cost, vs SPY, 2021-04-01 → 2026-03-31):
@@ -55,7 +56,8 @@ was risked.
 The process, in order:
 
 1. Write the spec, including the exact go/kill criteria, **before** building
-   anything (spec [§3.6](docs/superpowers/specs/2026-06-10-drifthunter-design.md#36-phase-0-gokill-criteria-pre-committed)).
+   anything (the criteria are frozen in [`config.yaml`](config.yaml)'s `gate:`
+   block and were applied unchanged — see the [runbook](docs/phase0-runbook.md)).
 2. Build the backtest engine (100 passing tests).
 3. Run it once against 5 years of data.
 4. Accept the verdict — KILL — without retuning, reslicing, or
@@ -102,7 +104,8 @@ signal at this latency, not a regime-headwind artifact.
 In short: **the academic post-filing drift is real in this data, but it's
 consumed before a daily-bar, next-open strategy can capture it.** Capturing
 it would require same-day-of-filing (intraday) entry, which this system
-deliberately does not attempt (see "Out of scope" in the spec).
+deliberately does not attempt — intraday execution was an explicit
+out-of-scope decision from day one.
 
 ---
 

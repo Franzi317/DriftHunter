@@ -2,11 +2,13 @@
 
 Replays COMPLETED event rows (`filter_reason == ""`) for ONE (horizon,
 cost_bps) pair in chronological order, simulating a single book with a fixed
-bankroll, fixed per-position sizing, a cap on concurrent open positions, and
-a cap on new entries per calendar day. There is no bumping: when the book is
-full, the cap is hit, or cash is insufficient, the candidate is skipped (and
-the corresponding skip counter incremented) -- it never displaces an existing
-position or gets queued for later.
+bankroll, equal-weight all-or-nothing position sizing (each position is
+exactly `cfg.position_size`, never a partial fill), a cap on concurrent open
+positions, and a cap on new entries per calendar day. There is no bumping:
+when the book is full, the cap is hit, or cash is insufficient to cover a
+full `position_size`, the candidate is skipped (and the corresponding skip
+counter incremented) -- it never displaces an existing position or gets
+queued for later.
 
 Equity is tracked on a REALIZED basis only: cash plus the at-cost value of
 open positions (i.e. positions are carried at their entry size, not marked to
@@ -87,10 +89,10 @@ def simulate(events: pd.DataFrame, cfg: PortfolioConfig) -> SimResult:
         if len(open_positions) >= cfg.max_positions:
             skipped_full += 1
             continue
-        size = min(cfg.position_size, cash)
-        if size < cfg.position_size * 0.5:
+        if cash < cfg.position_size:
             skipped_cash += 1
             continue
+        size = cfg.position_size
         cash -= size
         open_positions.append({
             "ticker": row.ticker, "exit_date": row.exit_date,

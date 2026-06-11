@@ -65,3 +65,17 @@ def test_max_drawdown_on_realized_curve():
     # After A: equity 4500 (dd = 500/5000 = 10%). B adds +100.
     assert result.max_drawdown == pytest.approx(0.10)
     assert result.final_equity == pytest.approx(4600.0)
+
+
+def test_all_or_nothing_sizing_skips_when_cash_insufficient():
+    cfg = PortfolioConfig(bankroll=2500.0, position_size=1000.0,
+                          max_positions=10, max_entries_per_day=10)
+    df = pd.DataFrame([
+        event("A", "2024-03-04", "2024-03-20", 0.0, score=3.0),
+        event("B", "2024-03-04", "2024-03-20", 0.0, score=2.0),
+        event("C", "2024-03-04", "2024-03-20", 0.0, score=1.0),
+    ])
+    result = simulate(df, cfg)
+    # 2500 - 1000 (A) - 1000 (B) = 500 cash left; 500 < 1000 -> C skipped.
+    assert result.trades_taken == 2
+    assert result.skipped_no_cash == 1

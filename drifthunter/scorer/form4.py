@@ -5,33 +5,32 @@ ignored: a holiday inside the window widens it by at most a day, which is
 noise relative to the 10-day window, and keeps live/backtest behavior
 identical with no calendar dependency).
 
-Clustering algorithm
----------------------
+Day-batched eager firing
+-------------------------
 Per issuer, eligible buys (value >= min_transaction_value, ticker present)
-are sorted by filing date and grouped into *maximal chains*: consecutive
-buys (by filing date) are joined into the same chain whenever they are no
-more than ``cluster_window_bdays`` business days apart. A gap larger than
-the window starts a new chain.
+are grouped by ``filing_date`` -- all buys filed on the same day are known
+together (this matches live behavior, where entry queues to the next market
+open after the filing day anyway, so same-day filings are all known before
+entry).
 
-Each chain is evaluated as a whole against the fire conditions (>=2 distinct
-insiders, a qualifying single CEO/CFO buy, or a qualifying single buy of any
-size). If it fires, exactly one signal is emitted, dated on the *last*
-buy's filing date in the chain.
+Filing dates are walked in ascending order. For a given filing date D, the
+*window* is every eligible buy for the issuer with a filing date within
+``cluster_window_bdays`` business days before-or-equal D (inclusive of D
+itself). The fire conditions are evaluated over this window:
 
-Chains never overlap by construction (any two buys in different chains are
-more than ``cluster_window_bdays`` apart), which already gives "one signal
-per issuer per window" / anti-churn suppression for free -- a chain that
-fires cannot be immediately followed by another chain that also covers some
-of the same buys.
+- distinct insiders in the window >= cluster_min_insiders, or
+- a qualifying single CEO/CFO buy in the window, or
+- a qualifying single buy of any size in the window.
 
-Note on causality: this means a signal is only emitted once the chain has
-"settled" -- i.e. once a subsequent eligible buy (if any) falls outside the
-window of the previous one, or there is no more data. A live system should
-therefore evaluate an issuer's open chain once ``cluster_window_bdays`` have
-elapsed since its most recent eligible buy with no new eligible buys having
-arrived (or immediately if a new buy starts a fresh chain). This avoids
-firing prematurely on a partial cluster and then suppressing a stronger
-signal that arrives a day later.
+If the window fires and the issuer is not currently suppressed, exactly one
+signal is emitted, dated D, scored over the window, and the issuer is then
+suppressed until ``cluster_window_bdays`` business days have elapsed since D
+-- giving "one signal per issuer per window" / anti-churn suppression.
+
+Note on causality: the live system evaluates this same day-batched window as
+of each filing day and enters at the next market open -- there is no
+settling wait. A signal fires the moment its window's conditions are met,
+using only information available as of that filing day.
 """
 from __future__ import annotations
 
@@ -59,29 +58,35 @@ def detect_signals(buys: list[InsiderBuy], cfg: Form4Config) -> list[Signal]:
 
     signals: list[Signal] = []
     for issuer_buys in by_issuer.values():
-        issuer_buys.sort(key=lambda b: (b.filing_date, b.accession))
-
-        # Split into maximal chains: a new chain starts whenever the gap to
-        # the previous buy exceeds cluster_window_bdays.
-        chains: list[list[InsiderBuy]] = []
+        # Group eligible buys by filing date (day-batching).
+        by_date: dict[date, list[InsiderBuy]] = {}
         for b in issuer_buys:
-            if chains and _bdays_between(chains[-1][-1].filing_date, b.filing_date) <= cfg.cluster_window_bdays:
-                chains[-1].append(b)
-            else:
-                chains.append([b])
+            by_date.setdefault(b.filing_date, []).append(b)
 
-        for chain in chains:
-            insiders = {w.insider_cik for w in chain}
-            total = sum(w.value for w in chain)
-            any_ceo = any(w.is_ceo_cfo for w in chain)
-            last = chain[-1]
+        filing_dates = sorted(by_date.keys())
+
+        suppressed_until: date | None = None
+        for d in filing_dates:
+            if suppressed_until is not None and _bdays_between(suppressed_until, d) < cfg.cluster_window_bdays:
+                continue
+
+            window = [
+                b for b in issuer_buys
+                if 0 <= _bdays_between(b.filing_date, d) <= cfg.cluster_window_bdays
+            ]
+
+            insiders = {w.insider_cik for w in window}
+            total = sum(w.value for w in window)
+            any_ceo = any(w.is_ceo_cfo for w in window)
             fires = (
                 len(insiders) >= cfg.cluster_min_insiders
-                or any(w.is_ceo_cfo and w.value >= cfg.ceo_cfo_single_min for w in chain)
-                or any(w.value >= cfg.any_single_min for w in chain)
+                or any(w.is_ceo_cfo and w.value >= cfg.ceo_cfo_single_min for w in window)
+                or any(w.value >= cfg.any_single_min for w in window)
             )
             if not fires:
                 continue
+
+            latest = max(by_date[d], key=lambda b: (b.filing_date, b.accession))
             score = (
                 float(len(insiders))
                 + math.log10(total / cfg.min_transaction_value)
@@ -89,10 +94,12 @@ def detect_signals(buys: list[InsiderBuy], cfg: Form4Config) -> list[Signal]:
             )
             signals.append(Signal(
                 profile="form4",
-                ticker=last.ticker,  # type: ignore[arg-type]  # filtered above
-                trigger_date=last.filing_date,
+                ticker=latest.ticker,  # type: ignore[arg-type]  # filtered above
+                trigger_date=d,
                 score=round(score, 4),
                 detail=f"insiders={len(insiders)} total=${total:,.0f} ceo_cfo={any_ceo}",
             ))
+            suppressed_until = d
+
     signals.sort(key=lambda s: (s.trigger_date, s.ticker))
     return signals

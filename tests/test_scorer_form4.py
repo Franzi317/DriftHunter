@@ -75,9 +75,18 @@ def test_missing_ticker_is_skipped():
     assert signals == []
 
 
-def test_score_increases_with_cluster_size_and_ceo():
+def test_score_increases_with_ceo_in_cluster_at_fire_time():
     small = detect_signals([buy("A", 1), buy("B", 5)], CFG)[0]
-    big = detect_signals(
-        [buy("A", 1), buy("B", 4), buy("C", 5, ceo=True)], CFG
-    )[0]
+    big = detect_signals([buy("A", 1), buy("B", 5, ceo=True)], CFG)[0]
     assert big.score > small.score
+
+
+def test_same_day_buys_batch_into_one_signal():
+    # Three insiders, two filing on the same day: one signal, all three counted.
+    signals = detect_signals(
+        [buy("A", 1), buy("B", 5), buy("C", 5, ceo=True)], CFG
+    )
+    assert len(signals) == 1
+    assert signals[0].trigger_date == date(2024, 3, 5)
+    assert "insiders=3" in signals[0].detail
+    assert signals[0].score > 4.0  # 3 insiders + log10(90k/25k) + 1.0 CEO bonus

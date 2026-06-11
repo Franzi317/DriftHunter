@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import io
 import math
+import sys
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -216,6 +217,6 @@ def download_quarters(client: EdgarClient, start: date, end: date,
         skips: list[SkipCounts] = []
         quarter_buys = load_quarter_zip(raw, cfg, skip_counts=skips)
         counts = skips[0] if skips else SkipCounts()
-        print(f"form345 {label}: {len(quarter_buys)} buys, skips={counts}")
+        print(f"form345 {label}: {len(quarter_buys)} buys, skips={counts}", file=sys.stderr)
         buys.extend(quarter_buys)
     return buys

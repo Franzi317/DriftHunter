@@ -10,6 +10,13 @@ full `position_size`, the candidate is skipped (and the corresponding skip
 counter incremented) -- it never displaces an existing position or gets
 queued for later.
 
+Positions settle at NET-OF-COST returns: each position's return is
+`raw_return - cost_bps / 10_000` (a round-trip cost charged once per
+position, on entry+exit combined). Since `events` is a single (horizon,
+cost_bps) slice, this charges the same headline cost to every position --
+the gate's portfolio-level checks (`final_equity`, "portfolio excess > 0",
+max drawdown) therefore run AT THE HEADLINE COST, not cost-free.
+
 Equity is tracked on a REALIZED basis only: cash plus the at-cost value of
 open positions (i.e. positions are carried at their entry size, not marked to
 market). The equity curve is only updated when a position is closed (exit
@@ -51,12 +58,16 @@ class SimResult:
 
 def simulate(events: pd.DataFrame, cfg: PortfolioConfig) -> SimResult:
     """events: completed rows for ONE (horizon, cost_bps) pair.
-    Columns required: ticker, score, entry_date, exit_date, raw_return."""
+    Columns required: ticker, score, entry_date, exit_date, raw_return, cost_bps.
+
+    Positions settle at net-of-cost returns (raw_return - cost_bps/10_000),
+    so final_equity, max_drawdown, etc. reflect the headline trading cost."""
     df = events[events["filter_reason"] == ""].copy()
     # Contract: completed rows (filter_reason == "") must carry real returns.
     # Fail loudly here rather than silently propagating NaN equity downstream.
     assert df["raw_return"].notna().all(), "completed rows must have non-NaN raw_return"
     df = df.sort_values(["entry_date", "score", "ticker"], ascending=[True, False, True])
+    assert df["cost_bps"].nunique() <= 1, "simulate expects a single-cost slice"
 
     cash = cfg.bankroll
     open_positions: list[dict] = []   # {ticker, exit_date, size, ret}
@@ -94,9 +105,10 @@ def simulate(events: pd.DataFrame, cfg: PortfolioConfig) -> SimResult:
             continue
         size = cfg.position_size
         cash -= size
+        ret = row.raw_return - row.cost_bps / 10_000.0
         open_positions.append({
             "ticker": row.ticker, "exit_date": row.exit_date,
-            "size": size, "ret": row.raw_return,
+            "size": size, "ret": ret,
         })
         taken.append(row.ticker)
         entries_today = (row.entry_date, day_count + 1)

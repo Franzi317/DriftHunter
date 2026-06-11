@@ -90,8 +90,11 @@ def evaluate_gate(events: pd.DataFrame, coverage_rate: float, profile: str,
         reasons.append(f"horizon {best} passed all checks")
     else:
         decision = "KILL"
-        worst = horizon_stats[0]
-        reasons.extend(worst["failed_checks"] or ["no horizon passed"])
+        # Report the failed checks of the horizon CLOSEST to passing (fewest
+        # failed checks), tie-broken by lower horizon, rather than always the
+        # first horizon in the input list.
+        closest = min(horizon_stats, key=lambda s: (len(s["failed_checks"]), s["horizon"]))
+        reasons.extend(closest["failed_checks"] or ["no horizon passed"])
 
     if coverage_rate < gate.min_coverage:
         decision = f"SUSPECT-{decision}"

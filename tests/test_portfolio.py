@@ -21,7 +21,8 @@ def event(ticker, entry, exit_, ret, score=2.0):
 def test_pnl_of_single_trade():
     df = pd.DataFrame([event("A", "2024-03-04", "2024-03-06", 0.10)])
     result = simulate(df, CFG)
-    assert result.final_equity == pytest.approx(5000.0 + 1000.0 * 0.10)
+    # Net of 30bp round-trip cost: 1000 * (0.10 - 0.003) = 97.0
+    assert result.final_equity == pytest.approx(5000.0 + 1000.0 * (0.10 - 0.003))
     assert result.trades_taken == 1
     assert result.skipped_full_book == 0
 
@@ -62,9 +63,13 @@ def test_max_drawdown_on_realized_curve():
         event("B", "2024-03-07", "2024-03-11", 0.10),
     ])
     result = simulate(df, CFG)
-    # After A: equity 4500 (dd = 500/5000 = 10%). B adds +100.
-    assert result.max_drawdown == pytest.approx(0.10)
-    assert result.final_equity == pytest.approx(4600.0)
+    # Net of 30bp round-trip cost on each leg.
+    # A: proceeds = 1000 * (1 + (-0.50 - 0.003)) = 497.0 -> cash 4000+497=4497
+    #    dd = (5000-4497)/5000 = 503/5000 = 0.1006
+    # B: proceeds = 1000 * (1 + (0.10 - 0.003)) = 1097.0 -> cash 3497+1097=4594.0
+    #    equity 4594 < peak 5000, dd stays at 0.1006 (max).
+    assert result.max_drawdown == pytest.approx(0.1006)
+    assert result.final_equity == pytest.approx(4594.0)
 
 
 def test_all_or_nothing_sizing_skips_when_cash_insufficient():

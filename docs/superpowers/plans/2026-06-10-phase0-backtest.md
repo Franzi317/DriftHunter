@@ -430,12 +430,24 @@ git commit -m "feat: scorer dataclass models (InsiderBuy, ThirteenDFiling, Signa
 - Create: `drifthunter/scorer/form4.py`
 - Test: `tests/test_scorer_form4.py`
 
-Rules from spec §3.3. Signal fires for an issuer when, within a trailing window of `cluster_window_bdays` business days (weekday approximation; holidays ignored deliberately — document in code):
-- ≥2 distinct insiders with eligible buys (value ≥ `min_transaction_value`), or
-- a single eligible CEO/CFO buy ≥ `ceo_cfo_single_min`, or
-- any single eligible buy ≥ `any_single_min`.
+> **AMENDED during execution (2026-06-10):** the original inline implementation and the
+> `test_score_increases_with_cluster_size_and_ceo` test below were inconsistent (the CEO
+> buy arrived after the fire date, so no causal semantics could include it). The
+> implemented semantics are **day-batched eager firing** (commit `2a3fa9d`), which is
+> canonical; the code blocks below are kept for history.
 
-Score = `cluster_size + log10(total_value / min_transaction_value) + 1.0 if any CEO/CFO in cluster`. One signal per issuer per window: after a signal fires, suppress further signals for that issuer until `cluster_window_bdays` business days have passed (anti-churn; mirrors live behavior).
+Rules from spec §3.3, as implemented (day-batched eager fire):
+- Per issuer, eligible buys (value ≥ `min_transaction_value`, ticker present) are grouped
+  by `filing_date`; filing dates are walked in ascending order.
+- At date D the window = eligible buys with `0 <= busday_count(filing_date, D) <= cluster_window_bdays`
+  (weekday approximation; holidays ignored deliberately — documented in code).
+- Fires at D when the window holds ≥`cluster_min_insiders` distinct insiders, OR any single
+  buy in the window is CEO/CFO with value ≥ `ceo_cfo_single_min`, OR any single buy in the
+  window has value ≥ `any_single_min`.
+- Same-day filings batch into one evaluation (live entry queues to next open anyway).
+- After a fire, the issuer is suppressed until `cluster_window_bdays` business days pass.
+
+Score = `distinct_insiders + log10(total_window_value / min_transaction_value) + 1.0 if any CEO/CFO in window`. The replacement tests are `test_score_increases_with_ceo_in_cluster_at_fire_time` (both signals fire same day; big has the CEO at fire time) and `test_same_day_buys_batch_into_one_signal` (3 insiders incl. 2 same-day → one signal, `insiders=3`, score > 4.0).
 
 - [ ] **Step 1: Write the failing tests**
 

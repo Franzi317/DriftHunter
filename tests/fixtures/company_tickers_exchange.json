@@ -1,0 +1,11 @@
+{
+  "fields": ["cik", "name", "ticker", "exchange"],
+  "data": [
+    [320193, "Apple Inc.", "AAPL", "Nasdaq"],
+    [789019, "EXAMPLECO", "EXM", "NYSE"],
+    [1234567, "PINKCO HOLDINGS", "PNKC", "OTC"],
+    [9999001, "SpacCo", "SPCU", "Nasdaq"],
+    [9999001, "SpacCo", "SPC", "Nasdaq"],
+    [9999001, "SpacCo", "SPCW", "Nasdaq"]
+  ]
+}

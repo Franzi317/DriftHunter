@@ -14,11 +14,25 @@ class TickerMap:
 
     @classmethod
     def from_json(cls, raw: dict) -> TickerMap:
+        """Build the cik -> (ticker, exchange) map.
+
+        SEC's company_tickers_exchange.json lists MULTIPLE rows per company
+        when it has more than one listed security (common stock, warrants
+        like "AAPLW", units like "AAPLU", preferred/class shares, etc.). When
+        a CIK has multiple rows, prefer the most-common-stock-looking ticker:
+        the shortest ticker wins (common stock tickers are typically shorter
+        than their warrant/unit counterparts), with ties broken
+        alphabetically (e.g. "BRK.A" vs "BRK.B" -> "BRK.A").
+        """
         idx = {f: i for i, f in enumerate(raw["fields"])}
-        by_cik = {
-            int(row[idx["cik"]]): (str(row[idx["ticker"]]), str(row[idx["exchange"]]))
-            for row in raw["data"]
-        }
+        by_cik: dict[int, tuple[str, str]] = {}
+        for row in raw["data"]:
+            cik = int(row[idx["cik"]])
+            ticker = str(row[idx["ticker"]])
+            exchange = str(row[idx["exchange"]])
+            existing = by_cik.get(cik)
+            if existing is None or (len(ticker), ticker) < (len(existing[0]), existing[0]):
+                by_cik[cik] = (ticker, exchange)
         return cls(_by_cik=by_cik)
 
     @classmethod

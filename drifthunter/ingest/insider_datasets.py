@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 import sys
 import zipfile
 from dataclasses import dataclass
@@ -78,6 +79,52 @@ def _parse_sec_date(s: str) -> date | None:
 def _is_ceo_cfo(title: str, keywords: list[str]) -> bool:
     t = title.lower()
     return any(k in t for k in keywords)
+
+
+# A plausible US-listed ticker: 1-6 letters, optionally followed by a
+# class/share suffix introduced by "." or "-" (e.g. "BRK.B", "RDS-A").
+_TICKER_RE = re.compile(r"^[A-Z]{1,6}([.-][A-Z]{1,2})?$")
+
+# Stray bracket/paren characters seen wrapping ISSUERTRADINGSYMBOL values,
+# e.g. "(SIRI)", "[FOA]", "AREN]", "NCLH]".
+_BRACKET_CHARS = "[]() "
+
+
+def _normalize_ticker(raw: str) -> str | None:
+    """Clean a raw Form 4 ISSUERTRADINGSYMBOL value into a plausible ticker.
+
+    Real ISSUERTRADINGSYMBOL values are dirty free text: exchange-prefixed
+    ("NYSE:NYCB", "NASDAQ:DHC", "NYSE/TRN"), bracket/paren-wrapped
+    ("(SIRI)", "[FOA]", "AREN]", "NCLH]"), multi-symbol lists for dual-class
+    issuers ("UHAL UHALB", "UHAL,UHALB", "CRDA CRDB", "CCIX U"), letter-spaced
+    codes ("N O G" -> "NOG"), or simply not a ticker ("", "NONE", "N/A",
+    mutual fund codes like "TIPWX"). Returns None if the value can't be
+    turned into something that looks like a ticker.
+    """
+    s = raw.strip().upper()
+    # Strip surrounding/stray brackets, parens, and whitespace.
+    s = s.strip(_BRACKET_CHARS)
+    if not s or s in {"NONE", "N/A"}:
+        return None
+    # Exchange-prefixed symbols: "NYSE:NYCB" -> "NYCB", "NYSE/TRN" -> "TRN".
+    if ":" in s or "/" in s:
+        idx = max(s.rfind(":"), s.rfind("/"))
+        tail = s[idx + 1:]
+        if tail:
+            s = tail
+    # Multi-symbol lists: "UHAL UHALB" -> "UHAL", "UHAL,UHALB" -> "UHAL",
+    # but "N O G" (all single-letter tokens) -> "NOG".
+    if any(c.isspace() or c == "," for c in s):
+        tokens = [t for t in re.split(r"[\s,]+", s) if t]
+        if tokens and all(len(t) == 1 for t in tokens):
+            s = "".join(tokens)
+        elif tokens:
+            s = tokens[0]
+        else:
+            return None
+    if not _TICKER_RE.match(s):
+        return None
+    return s
 
 
 def _cik_sort_key(cik: str) -> tuple[int, int | str]:
@@ -151,9 +198,7 @@ def _build_buys(sub: pd.DataFrame, trans: pd.DataFrame, owners: pd.DataFrame,
         ):
             counts.bad_date_or_nonpositive += 1
             continue
-        ticker = d[COL_ISSUER_TICKER].strip().upper() or None
-        if ticker in {"NONE", "N/A"}:
-            ticker = None
+        ticker = _normalize_ticker(d[COL_ISSUER_TICKER])
         buys.append(InsiderBuy(
             accession=d[COL_ACCESSION].strip(),
             issuer_cik=d[COL_ISSUER_CIK].strip(),

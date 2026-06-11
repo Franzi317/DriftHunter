@@ -22,3 +22,20 @@ def test_listed_filter_excludes_otc():
     tm = TickerMap.from_json(json.loads(FIXTURE.read_text()))
     assert tm.is_listed("0000320193", ["NYSE", "Nasdaq"])
     assert not tm.is_listed("0001234567", ["NYSE", "Nasdaq"])
+
+
+def test_multi_listing_cik_prefers_shortest_common_stock_ticker():
+    # cik 9999001 has three rows (unit "SPCU", common "SPC", warrant "SPCW")
+    # ordered so the WRONG one (a unit) would win under last-row-wins. The
+    # shortest ticker, "SPC", is the common stock and must win.
+    tm = TickerMap.from_json(json.loads(FIXTURE.read_text()))
+    assert tm.ticker_for_cik("9999001") == "SPC"
+    assert tm.ticker_for_cik("0009999001") == "SPC"
+    assert tm.exchange_for_cik("9999001") == "Nasdaq"
+
+
+def test_single_row_lookups_unchanged():
+    tm = TickerMap.from_json(json.loads(FIXTURE.read_text()))
+    assert tm.ticker_for_cik("0000320193") == "AAPL"
+    assert tm.ticker_for_cik("0000789019") == "EXM"
+    assert tm.ticker_for_cik("0001234567") == "PNKC"

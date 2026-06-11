@@ -50,6 +50,26 @@ def _parse_quarter_label(label: str) -> tuple[int, int]:
     return int(year_s), int(q_s)
 
 
+def _looks_like_derivative_listing(ticker: str) -> bool:
+    """True if `ticker` looks like a warrant/unit/rights listing rather than
+    common stock (e.g. "AAPLW", "ABLVW", "ACHR-WT", "BTSGU", "GENVR").
+
+    Convention-based screen: 5+ letter Nasdaq-style codes ending in
+    W (warrant), U (unit), or R (rights) are derivative listings, as is the
+    explicit "-WT" suffix. Class-share tickers containing "." or "-" (other
+    than "-WT") are excluded from this screen to avoid misclassifying things
+    like "BRK.B".
+    """
+    if ticker.endswith("-WT"):
+        return True
+    return (
+        len(ticker) >= 5
+        and ticker[-1] in ("W", "U", "R")
+        and "." not in ticker
+        and "-" not in ticker
+    )
+
+
 class BenchmarkRoutingProvider:
     """Routes the benchmark ticker to the free provider (Sharadar SEP covers
     equities, not ETFs like SPY; the benchmark has no survivorship concern),
@@ -159,6 +179,14 @@ def signals(cfg: Config) -> None:
             else:
                 n_dropped += 1
         click.echo(f"{profile}: kept {n_kept}, dropped {n_dropped} (exchange filter)")
+
+    # --- Derivative-listing screen (defensive; spec section 3.3) ---
+    # Drop signals whose ticker looks like a warrant/unit/rights listing
+    # rather than common stock (these can slip through the exchange filter
+    # when a SPAC/issuer's common stock and its warrants share a CIK).
+    n_before = len(kept)
+    kept = [s for s in kept if not _looks_like_derivative_listing(s.ticker)]
+    click.echo(f"instrument filter: dropped {n_before - len(kept)}")
 
     df = pd.DataFrame({
         "profile": [s.profile for s in kept],

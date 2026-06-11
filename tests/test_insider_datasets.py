@@ -1,8 +1,10 @@
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from drifthunter.config import Form4Config
-from drifthunter.ingest.insider_datasets import SkipCounts, load_quarter_dir
+from drifthunter.ingest.insider_datasets import SkipCounts, _normalize_ticker, load_quarter_dir
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "form345"
 
@@ -72,3 +74,31 @@ def test_unparseable_price_skipped_and_counted():
     buys = load_quarter_dir(FIXTURE_DIR, CFG, skip_counts=skips)
     assert len(buys) == 3                      # blank-price row not loaded
     assert skips[0].unparseable_value == 1
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("NYSE:NYCB", "NYCB"),
+        ("NASDAQ:DHC", "DHC"),
+        ("NYSE/TRN", "TRN"),
+        ("(SIRI)", "SIRI"),
+        ("[FOA]", "FOA"),
+        ("AREN]", "AREN"),
+        ("NCLH]", "NCLH"),
+        ("N O G", "NOG"),
+        ("UHAL UHALB", "UHAL"),
+        ("UHAL,UHALB", "UHAL"),
+        ("CRDA CRDB", "CRDA"),
+        ("CCIX U", "CCIX"),
+        ("AAPL", "AAPL"),
+        ("BRK.B", "BRK.B"),
+        ("SZL.AX", "SZL.AX"),
+        ("TIPWX", "TIPWX"),
+        ("", None),
+        ("NONE", None),
+        ("N/A", None),
+    ],
+)
+def test_normalize_ticker(raw, expected):
+    assert _normalize_ticker(raw) == expected

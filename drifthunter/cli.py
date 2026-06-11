@@ -50,6 +50,28 @@ def _parse_quarter_label(label: str) -> tuple[int, int]:
     return int(year_s), int(q_s)
 
 
+def _make_provider(cfg: Config) -> CachingProvider:
+    """Construct the configured price provider, wrapped in a disk cache."""
+    if cfg.prices.provider == "sharadar":
+        import os
+        api_key = os.environ.get(cfg.prices.nasdaq_api_key_env)
+        if not api_key:
+            raise click.ClickException(
+                f"Environment variable {cfg.prices.nasdaq_api_key_env} is not set "
+                f"(required for prices.provider: sharadar). Set it, or set "
+                f"prices.provider: free in config.yaml to use the free fallback."
+            )
+        inner = SharadarProvider(api_key)
+    elif cfg.prices.provider == "free":
+        inner = FreeProvider()
+    else:
+        raise click.ClickException(
+            f"Unknown prices.provider: {cfg.prices.provider!r} (expected 'sharadar' or 'free')"
+        )
+
+    return CachingProvider(inner, cfg.data_dir / "prices")
+
+
 # ---------------------------------------------------------------------------
 # signals
 # ---------------------------------------------------------------------------
@@ -57,7 +79,12 @@ def _parse_quarter_label(label: str) -> tuple[int, int]:
 @cli.command()
 @click.pass_obj
 def signals(cfg: Config) -> None:
-    """Ingest Form 4 + SC 13D filings, score, and filter to tradable signals."""
+    """Ingest Form 4 + SC 13D filings, score, and filter to tradable signals.
+
+    Resumability is cache-backed (EdgarClient disk cache under
+    data/edgar_cache), not checkpoint-backed: clearing the cache directory
+    re-fetches everything.
+    """
     start = date.fromisoformat(cfg.study.start)
     end = date.fromisoformat(cfg.study.end)
 
@@ -152,24 +179,7 @@ def study(cfg: Config) -> None:
         for row in df.itertuples()
     ]
 
-    if cfg.prices.provider == "sharadar":
-        import os
-        api_key = os.environ.get(cfg.prices.nasdaq_api_key_env)
-        if not api_key:
-            raise click.ClickException(
-                f"Environment variable {cfg.prices.nasdaq_api_key_env} is not set "
-                f"(required for prices.provider: sharadar). Set it, or set "
-                f"prices.provider: free in config.yaml to use the free fallback."
-            )
-        inner = SharadarProvider(api_key)
-    elif cfg.prices.provider == "free":
-        inner = FreeProvider()
-    else:
-        raise click.ClickException(
-            f"Unknown prices.provider: {cfg.prices.provider!r} (expected 'sharadar' or 'free')"
-        )
-
-    provider = CachingProvider(inner, cfg.data_dir / "prices")
+    provider = _make_provider(cfg)
 
     events = run_event_study(
         sigs, provider, cfg.tradability,
@@ -214,24 +224,7 @@ def report(cfg: Config) -> None:
     events = pd.read_parquet(events_path)
     coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
 
-    if cfg.prices.provider == "sharadar":
-        import os
-        api_key = os.environ.get(cfg.prices.nasdaq_api_key_env)
-        if not api_key:
-            raise click.ClickException(
-                f"Environment variable {cfg.prices.nasdaq_api_key_env} is not set "
-                f"(required for prices.provider: sharadar). Set it, or set "
-                f"prices.provider: free in config.yaml to use the free fallback."
-            )
-        inner = SharadarProvider(api_key)
-    elif cfg.prices.provider == "free":
-        inner = FreeProvider()
-    else:
-        raise click.ClickException(
-            f"Unknown prices.provider: {cfg.prices.provider!r} (expected 'sharadar' or 'free')"
-        )
-
-    provider = CachingProvider(inner, cfg.data_dir / "prices")
+    provider = _make_provider(cfg)
 
     verdicts = []
     for profile in coverage:

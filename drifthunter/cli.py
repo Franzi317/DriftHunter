@@ -104,7 +104,6 @@ def signals(cfg: Config) -> None:
         if f.ticker:
             ticker_to_cik[f.ticker] = f.subject_cik
 
-    all_signals = form4_signals + sc13d_signals
     kept: list[Signal] = []
     for profile, profile_signals in (("form4", form4_signals), ("sc13d", sc13d_signals)):
         n_kept = 0

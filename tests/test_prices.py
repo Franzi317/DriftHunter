@@ -44,3 +44,17 @@ def test_coverage_report(tmp_path):
     assert cov.covered == 1
     assert cov.rate == pytest.approx(0.5)
     assert cov.missing == ["GONE"]
+
+
+def test_slash_ticker_does_not_crash_cache(tmp_path):
+    inner = FakeProvider({"BF/B": make_prices()})
+    p = CachingProvider(inner, tmp_path)
+    df = p.daily("BF/B", date(2024, 1, 2), date(2024, 2, 9))
+    assert not df.empty
+    assert inner.calls == 1
+    # second call served from cache
+    p.daily("BF/B", date(2024, 1, 2), date(2024, 2, 9))
+    assert inner.calls == 1
+    # cache file written inside cache_dir, not a subdirectory
+    files = list(tmp_path.glob("*.parquet"))
+    assert len(files) == 1

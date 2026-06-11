@@ -18,6 +18,10 @@ INDEX_URL = "https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{q}/form.id
 class IndexRow:
     form_type: str
     filer_name: str
+    # Unpadded CIK as it appears in form.idx (e.g. "1336528"), unlike
+    # FilingHeader.subject_cik/filer_cik which are zero-padded to 10
+    # digits (e.g. "0001336528"); not directly comparable without
+    # normalizing one side.
     filer_cik: str
     date_filed: date
     path: str

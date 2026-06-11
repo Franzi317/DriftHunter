@@ -37,7 +37,12 @@ RESULT_COLUMNS = [
 ]
 
 
-def _empty_row(sig: Signal, horizon: int, cost_bps: int, reason: str) -> dict:
+def _row(sig: Signal, horizon: int, cost_bps: int, reason: str = "", *,
+         entry_date=pd.NaT, exit_date=pd.NaT,
+         raw_return: float = float("nan"),
+         excess_return: float = float("nan")) -> dict:
+    """Build one result row. Single source of truth for the row schema --
+    every path (happy or filtered) constructs rows through this function."""
     return {
         "profile": sig.profile,
         "ticker": sig.ticker,
@@ -45,10 +50,10 @@ def _empty_row(sig: Signal, horizon: int, cost_bps: int, reason: str) -> dict:
         "score": sig.score,
         "horizon": horizon,
         "cost_bps": cost_bps,
-        "entry_date": pd.NaT,
-        "exit_date": pd.NaT,
-        "raw_return": float("nan"),
-        "excess_return": float("nan"),
+        "entry_date": entry_date,
+        "exit_date": exit_date,
+        "raw_return": raw_return,
+        "excess_return": excess_return,
         "filter_reason": reason,
     }
 
@@ -57,7 +62,7 @@ def _filtered_rows(sig: Signal, horizons: list[int], cost_bps_list: list[int],
                     reason: str) -> list[dict]:
     """All (horizon, cost_bps) combos for `sig`, each marked with `reason`."""
     return [
-        _empty_row(sig, h, c, reason)
+        _row(sig, h, c, reason)
         for h in horizons
         for c in cost_bps_list
     ]
@@ -66,7 +71,7 @@ def _filtered_rows(sig: Signal, horizons: list[int], cost_bps_list: list[int],
 def _horizon_filtered_rows(sig: Signal, horizon: int, cost_bps_list: list[int],
                             reason: str) -> list[dict]:
     """All cost_bps combos for one `horizon` of `sig`, marked with `reason`."""
-    return [_empty_row(sig, horizon, c, reason) for c in cost_bps_list]
+    return [_row(sig, horizon, c, reason) for c in cost_bps_list]
 
 
 def _event_rows(sig: Signal, px: pd.DataFrame, spy: pd.DataFrame,
@@ -81,6 +86,9 @@ def _event_rows(sig: Signal, px: pd.DataFrame, spy: pd.DataFrame,
         return _filtered_rows(sig, horizons, cost_bps_list, "insufficient_history")
 
     entry_date = future.index[0]
+    # .get_loc on a label returns a single position (not a slice/mask) because
+    # the provider contract guarantees a unique, sorted index (CachingProvider
+    # dedupes), so entry_date maps to exactly one row.
     entry_pos = px.index.get_loc(entry_date)
     entry_open = float(px.iloc[entry_pos]["open"])
 
@@ -95,6 +103,15 @@ def _event_rows(sig: Signal, px: pd.DataFrame, spy: pd.DataFrame,
     if adv < trad.min_avg_dollar_volume:
         return _filtered_rows(sig, horizons, cost_bps_list, "adv")
 
+    # entry_date is fixed for all horizons, so its membership in spy.index is
+    # horizon-independent and is checked once here; exit_date depends on
+    # horizon and is still checked per-horizon below. The per-horizon
+    # insufficient_history check runs first (as before), so it still takes
+    # precedence over this entry-side benchmark_gap for horizons that
+    # overrun the price history.
+    entry_in_spy = entry_date in spy.index
+    spy_entry_open = float(spy.loc[entry_date, "open"]) if entry_in_spy else float("nan")
+
     rows: list[dict] = []
     for horizon in horizons:
         exit_pos = entry_pos + horizon
@@ -106,30 +123,19 @@ def _event_rows(sig: Signal, px: pd.DataFrame, spy: pd.DataFrame,
         exit_open = float(px.iloc[exit_pos]["open"])
         raw_return = exit_open / entry_open - 1.0
 
-        if entry_date not in spy.index or exit_date not in spy.index:
+        if not entry_in_spy or exit_date not in spy.index:
             rows.extend(_horizon_filtered_rows(sig, horizon, cost_bps_list, "benchmark_gap"))
             continue
 
-        spy_entry_open = float(spy.loc[entry_date, "open"])
         spy_exit_open = float(spy.loc[exit_date, "open"])
         spy_return = spy_exit_open / spy_entry_open - 1.0
 
         for cost_bps in cost_bps_list:
             net_return = raw_return - cost_bps / 10_000
             excess_return = net_return - spy_return
-            rows.append({
-                "profile": sig.profile,
-                "ticker": sig.ticker,
-                "trigger_date": sig.trigger_date,
-                "score": sig.score,
-                "horizon": horizon,
-                "cost_bps": cost_bps,
-                "entry_date": entry_date,
-                "exit_date": exit_date,
-                "raw_return": raw_return,
-                "excess_return": excess_return,
-                "filter_reason": "",
-            })
+            rows.append(_row(sig, horizon, cost_bps,
+                              entry_date=entry_date, exit_date=exit_date,
+                              raw_return=raw_return, excess_return=excess_return))
 
     return rows
 
@@ -160,6 +166,9 @@ def run_event_study(signals: list[Signal], provider: PriceProvider,
     for ticker, sigs in by_ticker.items():
         triggers = [s.trigger_date for s in sigs]
         start = min(triggers) - timedelta(days=LOOKBACK_CAL_DAYS)
+        # 2*max_horizon: trading-day horizons over-fetched as calendar days
+        # (weekends/holidays); 90d base pad covers the exit window for
+        # typical horizons.
         end = max(triggers) + timedelta(days=LOOKAHEAD_CAL_DAYS + 2 * max_horizon)
         ticker_ranges[ticker] = (start, end)
         ticker_frames[ticker] = provider.daily(ticker, start, end)

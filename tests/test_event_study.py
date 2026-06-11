@@ -104,3 +104,25 @@ def test_one_fetch_per_ticker_plus_benchmark():
     run_event_study(sigs, provider, TRAD, horizons=[2], cost_bps_list=[30], benchmark="SPY")
     assert provider.calls.count("EXM") == 1
     assert provider.calls.count("SPY") == 1
+
+
+def test_full_cross_product_row_count_and_columns():
+    frames = {
+        "EXM": prices([10.0] * 80),
+        "SPY": prices([400.0] * 80, volume=1e7),
+    }
+    sigs = [
+        Signal(profile="form4", ticker="EXM", trigger_date=date(2024, 3, 1), score=2.0, detail=""),
+        Signal(profile="sc13d", ticker="NOPRICES", trigger_date=date(2024, 3, 5), score=2.0, detail=""),
+    ]
+    horizons, costs = [2, 5, 10], [10, 30]
+    result = run_event_study(sigs, DictProvider(frames), TRAD,
+                             horizons=horizons, cost_bps_list=costs, benchmark="SPY")
+    assert len(result) == len(sigs) * len(horizons) * len(costs)
+    assert list(result.columns) == [
+        "profile", "ticker", "trigger_date", "score", "horizon", "cost_bps",
+        "entry_date", "exit_date", "raw_return", "excess_return", "filter_reason",
+    ]
+    # every (signal, horizon, cost) combo exactly once
+    combos = result.groupby(["ticker", "horizon", "cost_bps"]).size()
+    assert (combos == 1).all()

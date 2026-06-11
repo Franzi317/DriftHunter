@@ -50,6 +50,22 @@ def _parse_quarter_label(label: str) -> tuple[int, int]:
     return int(year_s), int(q_s)
 
 
+class BenchmarkRoutingProvider:
+    """Routes the benchmark ticker to the free provider (Sharadar SEP covers
+    equities, not ETFs like SPY; the benchmark has no survivorship concern),
+    all other tickers to the configured primary provider."""
+
+    def __init__(self, primary, benchmark_ticker: str):
+        self._primary = primary
+        self._free = FreeProvider()
+        self._benchmark = benchmark_ticker
+
+    def daily(self, ticker, start, end):
+        if ticker == self._benchmark:
+            return self._free.daily(ticker, start, end)
+        return self._primary.daily(ticker, start, end)
+
+
 def _make_provider(cfg: Config) -> CachingProvider:
     """Construct the configured price provider, wrapped in a disk cache."""
     if cfg.prices.provider == "sharadar":
@@ -61,7 +77,7 @@ def _make_provider(cfg: Config) -> CachingProvider:
                 f"(required for prices.provider: sharadar). Set it, or set "
                 f"prices.provider: free in config.yaml to use the free fallback."
             )
-        inner = SharadarProvider(api_key)
+        inner = BenchmarkRoutingProvider(SharadarProvider(api_key), cfg.study.benchmark)
     elif cfg.prices.provider == "free":
         inner = FreeProvider()
     else:

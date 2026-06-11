@@ -3,6 +3,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
+from drifthunter.cli import BenchmarkRoutingProvider
 from drifthunter.prices.provider import CachingProvider, coverage_report
 
 
@@ -58,3 +59,22 @@ def test_slash_ticker_does_not_crash_cache(tmp_path):
     # cache file written inside cache_dir, not a subdirectory
     files = list(tmp_path.glob("*.parquet"))
     assert len(files) == 1
+
+
+def test_benchmark_routing_sends_benchmark_to_free_provider():
+    # Sharadar SEP covers equities but not ETFs, so SPY would come back empty
+    # from the primary provider; the router should fall back to the free
+    # provider for the configured benchmark ticker only.
+    primary = FakeProvider({"EXM": make_prices()})  # no "SPY" entry -> empty
+    router = BenchmarkRoutingProvider(primary, benchmark_ticker="SPY")
+    # White-box: substitute the free provider with a fake so the test doesn't
+    # hit yfinance/network.
+    router._free = FakeProvider({"SPY": make_prices()})
+
+    spy = router.daily("SPY", date(2024, 1, 2), date(2024, 2, 9))
+    exm = router.daily("EXM", date(2024, 1, 2), date(2024, 2, 9))
+
+    assert not spy.empty
+    assert not exm.empty
+    assert primary.calls == 1  # only EXM went to primary
+    assert router._free.calls == 1  # only SPY went to free

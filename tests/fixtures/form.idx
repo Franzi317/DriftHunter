@@ -1,0 +1,9 @@
+Description:           Master Index of EDGAR Dissemination Feed by Form Type
+Last Data Received:    March 31, 2024
+
+Form Type   Company Name                                                  CIK         Date Filed  File Name
+---------------------------------------------------------------------------------------------------------------
+SC 13D      ACTIVIST CAPITAL LP                                           1336528     2024-03-04  edgar/data/789019/0001336528-24-000012.txt
+SC 13D/A    OTHER FUND LLC                                                1400000     2024-03-05  edgar/data/320193/0001400000-24-000033.txt
+SC 13G      PASSIVE HOLDINGS INC                                          1500000     2024-03-05  edgar/data/320193/0001500000-24-000044.txt
+SC 13D      SECOND ACTIVIST LP                                            1600000     2024-03-06  edgar/data/999999/0001600000-24-000055.txt

@@ -10,6 +10,8 @@ from drifthunter.config import EdgarConfig
 
 
 class EdgarClient:
+    """Construct once per run and reuse; each instance owns an httpx connection pool."""
+
     def __init__(self, cfg: EdgarConfig, cache_dir: Path):
         self._min_interval = 1.0 / cfg.max_requests_per_sec
         self._last_request = 0.0
@@ -21,7 +23,10 @@ class EdgarClient:
         )
 
     def get_bytes(self, url: str, cache_key: str) -> bytes:
-        """Fetch with throttle + retry; cache to disk keyed by cache_key."""
+        """Fetch with throttle + retry; cache to disk keyed by cache_key.
+
+        Cache is permanent: delete the cache file to force a re-fetch.
+        """
         cached = self._cache_dir / cache_key
         if cached.exists():
             return cached.read_bytes()
@@ -30,9 +35,15 @@ class EdgarClient:
             if wait > 0:
                 time.sleep(wait)
             self._last_request = time.monotonic()
-            resp = self._client.get(url)
+            try:
+                resp = self._client.get(url)
+            except httpx.TransportError:
+                time.sleep(2 ** attempt)
+                self._last_request = time.monotonic()
+                continue
             if resp.status_code in (429, 500, 502, 503):
                 time.sleep(2 ** attempt)
+                self._last_request = time.monotonic()
                 continue
             resp.raise_for_status()
             cached.parent.mkdir(parents=True, exist_ok=True)

@@ -43,6 +43,12 @@ def bootstrap_ci(values, n_iter: int, seed: int, alpha: float = 0.05) -> Bootstr
 
 
 def yearly_means(df: pd.DataFrame) -> dict[int, float]:
-    """Mean excess_return grouped by trigger_date year."""
-    grouped = df.groupby(df["trigger_date"].dt.year)["excess_return"].mean()
+    """Mean excess_return grouped by trigger_date year.
+
+    `trigger_date` may be `datetime64` (synthetic test frames) or
+    object-dtype `date` values (run_event_study output, which carries
+    Signal.trigger_date through unchanged); pd.to_datetime normalizes
+    either to a `.dt`-capable series.
+    """
+    grouped = df.groupby(pd.to_datetime(df["trigger_date"]).dt.year)["excess_return"].mean()
     return {int(y): float(v) for y, v in grouped.items()}

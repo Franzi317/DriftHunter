@@ -29,7 +29,16 @@ def _annualized(total_return: float, years: float) -> float:
 def evaluate_gate(events: pd.DataFrame, coverage_rate: float, profile: str,
                   gate: GateConfig, port: PortfolioConfig, headline_cost_bps: int,
                   horizons: list[int], seed: int,
-                  spy_annual_return: float) -> GateVerdict:
+                  spy_annual_return: float,
+                  bootstrap_iterations: int = 10_000) -> GateVerdict:
+    """Evaluate the GO/KILL gate (spec §3.6) for a single profile.
+
+    Benchmark contract: `spy_annual_return` MUST be the SPY CAGR computed
+    from real prices over the same span as this profile's portfolio
+    (entry_date.min -> exit_date.max). Passing 0.0 degrades the "portfolio
+    excess > 0" check to "portfolio made money", which can soften a KILL
+    into a GO in bull markets.
+    """
     min_events = gate.form4_min_events if profile == "form4" else gate.sc13d_min_events
     df = events[(events["profile"] == profile)
                 & (events["cost_bps"] == headline_cost_bps)
@@ -43,7 +52,10 @@ def evaluate_gate(events: pd.DataFrame, coverage_rate: float, profile: str,
         n = len(hdf)
         if n == 0:
             continue
-        ci = bootstrap_ci(hdf["excess_return"].to_numpy(), n_iter=10_000, seed=seed)
+        ci = bootstrap_ci(hdf["excess_return"].to_numpy(), n_iter=bootstrap_iterations, seed=seed)
+        # yearly_means groups by trigger_date year (signal vintage), while the
+        # annualization span below uses entry/exit dates (capital-deployed
+        # window) -- this divergence is deliberate.
         years = yearly_means(hdf)
         positive_years = sum(1 for v in years.values() if v > 0)
         sim = simulate(hdf, port)
@@ -95,7 +107,10 @@ def render_markdown(verdicts: list[GateVerdict], events: pd.DataFrame) -> str:
     for v in verdicts:
         lines += [f"## Profile: {v.profile} — **{v.decision}**", "",
                   f"Coverage: {v.coverage_rate:.1%}",
-                  f"Reasons: {'; '.join(v.reasons)}", "",
+                  f"Reasons: {'; '.join(v.reasons)}"]
+        if v.best_horizon is not None:
+            lines.append(f"Best horizon: {v.best_horizon}")
+        lines += ["",
                   "| Horizon | N | Mean excess | 95% CI | Pos. years | Port. excess (ann.) | Max DD | Skipped (full book) | Pass |",
                   "|---|---|---|---|---|---|---|---|---|"]
         for s in v.horizon_stats:
@@ -108,11 +123,17 @@ def render_markdown(verdicts: list[GateVerdict], events: pd.DataFrame) -> str:
         lines.append("")
     lines += ["> Max DD is computed on the REALIZED equity curve (positions held at cost",
               "> until exit); it understates true intra-position peak-to-trough drawdown.",
-              "> Treat the gate's drawdown check as a lower bound, not an estimate.", ""]
+              "> Treat the gate's drawdown check as a lower bound, not an estimate.", "",
+              "> The bootstrap CI resamples per-event excess returns independently. Events with",
+              "> overlapping holding windows share market-regime exposure, so the true CI is wider",
+              "> than reported; treat \"CI lo > 0\" as necessary but not sufficient, and prefer a",
+              "> comfortable margin over a marginal pass.", ""]
     filtered = events[events["filter_reason"] != ""]
     if not filtered.empty:
         lines += ["## Excluded events by reason", ""]
-        counts = filtered.groupby("filter_reason")["ticker"].nunique()
-        for reason, n in counts.items():
-            lines.append(f"- {reason}: {n} tickers")
+        for reason, group in filtered.groupby("filter_reason"):
+            dedup = group.drop_duplicates(subset=["ticker", "trigger_date"])
+            n_events = len(dedup)
+            n_tickers = dedup["ticker"].nunique()
+            lines.append(f"- {reason}: {n_events} events ({n_tickers} tickers)")
     return "\n".join(lines)

@@ -66,3 +66,14 @@ def test_markdown_renders_both_profiles():
                       horizons=[10], seed=42, spy_annual_return=0.0)
     md = render_markdown([v], events)
     assert "form4" in md and "GO" in md and "Coverage" in md
+
+
+def test_markdown_includes_bootstrap_caveat_and_best_horizon():
+    events = make_events("form4", 200, mean_ret=0.03)
+    v = evaluate_gate(events, coverage_rate=1.0, profile="form4",
+                      gate=GATE, port=PORT, headline_cost_bps=30,
+                      horizons=[10], seed=42, spy_annual_return=0.0)
+    md = render_markdown([v], events)
+    assert v.decision == "GO"
+    assert "The bootstrap CI resamples per-event excess returns independently" in md
+    assert "Best horizon:" in md

@@ -146,7 +146,7 @@ prices:
   nasdaq_api_key_env: NASDAQ_DATA_LINK_API_KEY
 
 edgar:
-  user_agent: "DriftHunter research ryanfranzman@gmail.com"
+  user_agent: "DriftHunter research your-email@example.com"
   max_requests_per_sec: 8
 ```
 

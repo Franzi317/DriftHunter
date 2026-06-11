@@ -3,6 +3,23 @@
 Bundles: https://www.sec.gov/data-research/sec-markets-data/insider-transactions-data-sets
 Each quarter is a ZIP containing SUBMISSION.tsv, NONDERIV_TRANS.tsv,
 REPORTINGOWNER.tsv (and others we ignore).
+
+Joint filings and the per-accession owner aggregate: a single Form 4 accession
+can list MULTIPLE REPORTINGOWNER rows when several reporting persons co-file
+one report for the same transaction(s) -- e.g. a fund, its general partner,
+and the managing member jointly reporting one purchase. Naively merging
+NONDERIV_TRANS x SUBMISSION x REPORTINGOWNER on ACCESSION_NUMBER fans out
+1 transaction row x N owner rows into N InsiderBuy records, each carrying the
+full transaction value. That both multi-counts dollar value in cluster totals
+and makes a single joint purchase decision look like an N-insider cluster,
+producing false cluster signals. To avoid this, owners are first collapsed to
+one aggregate row per accession: insider_cik/insider_name come from the owner
+with the smallest integer RPTOWNERCIK (a deterministic choice that lets
+affiliated co-filers collapse to a single identity for cluster-distinctness
+purposes), and is_ceo_cfo is True if ANY owner row for the accession matches
+the CEO/CFO title keywords. This owner aggregate is then merged 1:1 with
+transactions x submissions, yielding exactly one InsiderBuy per transaction
+row regardless of how many reporting owners co-filed it.
 """
 from __future__ import annotations
 
@@ -60,6 +77,41 @@ def _is_ceo_cfo(title: str, keywords: list[str]) -> bool:
     return any(k in t for k in keywords)
 
 
+def _cik_sort_key(cik: str) -> tuple[int, int | str]:
+    """Sort key for RPTOWNERCIK: numeric ciks sort by integer value (so
+    unequal-length numeric strings compare correctly, e.g. "999" < "10000001"
+    numerically despite the reverse being true lexicographically); any
+    non-numeric cik sorts after all numeric ones, by string value.
+    """
+    try:
+        return (0, int(cik))
+    except ValueError:
+        return (1, cik)
+
+
+def _aggregate_owners(owners: pd.DataFrame, cfg: Form4Config) -> pd.DataFrame:
+    """Collapse REPORTINGOWNER rows to one aggregate row per accession.
+
+    insider_cik/insider_name come from the owner with the smallest integer
+    RPTOWNERCIK (whitespace-stripped before comparison); is_ceo_cfo is True
+    if ANY owner row for the accession has a CEO/CFO title.
+    """
+    df = owners.copy()
+    df[COL_OWNER_CIK] = df[COL_OWNER_CIK].str.strip()
+    titles = df[COL_OWNER_TITLE] if COL_OWNER_TITLE in df.columns else pd.Series("", index=df.index)
+    df["_is_ceo_cfo"] = titles.apply(
+        lambda t: _is_ceo_cfo(t, cfg.ceo_cfo_title_keywords)
+    )
+    df["_cik_sort_key"] = df[COL_OWNER_CIK].apply(_cik_sort_key)
+    df = df.sort_values("_cik_sort_key", kind="stable")
+
+    primary = df.groupby(COL_ACCESSION, as_index=False).first()[
+        [COL_ACCESSION, COL_OWNER_CIK, COL_OWNER_NAME]
+    ]
+    any_ceo_cfo = df.groupby(COL_ACCESSION, as_index=False)["_is_ceo_cfo"].any()
+    return primary.merge(any_ceo_cfo, on=COL_ACCESSION)
+
+
 def _build_buys(sub: pd.DataFrame, trans: pd.DataFrame, owners: pd.DataFrame,
                 cfg: Form4Config) -> list[InsiderBuy]:
     sub = sub[sub[COL_DOC_TYPE].str.strip() == "4"]
@@ -67,7 +119,8 @@ def _build_buys(sub: pd.DataFrame, trans: pd.DataFrame, owners: pd.DataFrame,
         (trans[COL_TRANS_CODE].str.strip() == "P")
         & (trans[COL_ACQ_DISP].str.strip() == "A")
     ]
-    merged = trans.merge(sub, on=COL_ACCESSION).merge(owners, on=COL_ACCESSION)
+    owner_agg = _aggregate_owners(owners, cfg)
+    merged = trans.merge(sub, on=COL_ACCESSION).merge(owner_agg, on=COL_ACCESSION)
     buys: list[InsiderBuy] = []
     for d in merged.to_dict("records"):
         filing_date = _parse_sec_date(d[COL_FILING_DATE])
@@ -88,7 +141,7 @@ def _build_buys(sub: pd.DataFrame, trans: pd.DataFrame, owners: pd.DataFrame,
             ticker=ticker,
             insider_cik=d[COL_OWNER_CIK].strip(),
             insider_name=d[COL_OWNER_NAME].strip(),
-            is_ceo_cfo=_is_ceo_cfo(d.get(COL_OWNER_TITLE, ""), cfg.ceo_cfo_title_keywords),
+            is_ceo_cfo=bool(d["_is_ceo_cfo"]),
             trans_date=trans_date,
             filing_date=filing_date,
             shares=shares,

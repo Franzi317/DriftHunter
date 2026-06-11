@@ -24,7 +24,9 @@ row regardless of how many reporting owners co-filed it.
 from __future__ import annotations
 
 import io
+import math
 import zipfile
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
@@ -112,8 +114,17 @@ def _aggregate_owners(owners: pd.DataFrame, cfg: Form4Config) -> pd.DataFrame:
     return primary.merge(any_ceo_cfo, on=COL_ACCESSION)
 
 
+@dataclass
+class SkipCounts:
+    """Counts of NONDERIV_TRANS rows (post P/A filter) dropped during ingest,
+    broken down by reason."""
+    unparseable_value: int = 0
+    bad_date_or_nonpositive: int = 0
+    dropped_by_merge: int = 0
+
+
 def _build_buys(sub: pd.DataFrame, trans: pd.DataFrame, owners: pd.DataFrame,
-                cfg: Form4Config) -> list[InsiderBuy]:
+                cfg: Form4Config) -> tuple[list[InsiderBuy], SkipCounts]:
     sub = sub[sub[COL_DOC_TYPE].str.strip() == "4"]
     trans = trans[
         (trans[COL_TRANS_CODE].str.strip() == "P")
@@ -121,6 +132,7 @@ def _build_buys(sub: pd.DataFrame, trans: pd.DataFrame, owners: pd.DataFrame,
     ]
     owner_agg = _aggregate_owners(owners, cfg)
     merged = trans.merge(sub, on=COL_ACCESSION).merge(owner_agg, on=COL_ACCESSION)
+    counts = SkipCounts(dropped_by_merge=len(trans) - len(merged))
     buys: list[InsiderBuy] = []
     for d in merged.to_dict("records"):
         filing_date = _parse_sec_date(d[COL_FILING_DATE])
@@ -129,8 +141,14 @@ def _build_buys(sub: pd.DataFrame, trans: pd.DataFrame, owners: pd.DataFrame,
             shares = float(d[COL_SHARES])
             price = float(d[COL_PRICE])
         except ValueError:
+            counts.unparseable_value += 1
             continue  # missing/footnoted price or shares: unscoreable, skip
-        if filing_date is None or trans_date is None or shares <= 0 or price <= 0:
+        if (
+            filing_date is None or trans_date is None
+            or not math.isfinite(shares) or not math.isfinite(price)
+            or shares <= 0 or price <= 0
+        ):
+            counts.bad_date_or_nonpositive += 1
             continue
         ticker = d[COL_ISSUER_TICKER].strip().upper() or None
         if ticker in {"NONE", "N/A"}:
@@ -147,27 +165,35 @@ def _build_buys(sub: pd.DataFrame, trans: pd.DataFrame, owners: pd.DataFrame,
             shares=shares,
             price=price,
         ))
-    return buys
+    return buys, counts
 
 
-def load_quarter_dir(dir_path: Path, cfg: Form4Config) -> list[InsiderBuy]:
+def load_quarter_dir(dir_path: Path, cfg: Form4Config,
+                      skip_counts: list[SkipCounts] | None = None) -> list[InsiderBuy]:
     """Load from an extracted directory (used by tests and inspection)."""
-    return _build_buys(
+    buys, counts = _build_buys(
         _read_tsv(dir_path / "SUBMISSION.tsv"),
         _read_tsv(dir_path / "NONDERIV_TRANS.tsv"),
         _read_tsv(dir_path / "REPORTINGOWNER.tsv"),
         cfg,
     )
+    if skip_counts is not None:
+        skip_counts.append(counts)
+    return buys
 
 
-def load_quarter_zip(zip_bytes: bytes, cfg: Form4Config) -> list[InsiderBuy]:
+def load_quarter_zip(zip_bytes: bytes, cfg: Form4Config,
+                      skip_counts: list[SkipCounts] | None = None) -> list[InsiderBuy]:
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         def read(name: str) -> pd.DataFrame:
             return _read_tsv(io.BytesIO(zf.read(name)))
-        return _build_buys(
+        buys, counts = _build_buys(
             read("SUBMISSION.tsv"), read("NONDERIV_TRANS.tsv"),
             read("REPORTINGOWNER.tsv"), cfg,
         )
+    if skip_counts is not None:
+        skip_counts.append(counts)
+    return buys
 
 
 def quarter_labels(start: date, end: date) -> list[str]:
@@ -187,5 +213,9 @@ def download_quarters(client: EdgarClient, start: date, end: date,
     buys: list[InsiderBuy] = []
     for label in quarter_labels(start, end):
         raw = client.get_bytes(DATASET_URL.format(label=label), f"form345/{label}.zip")
-        buys.extend(load_quarter_zip(raw, cfg))
+        skips: list[SkipCounts] = []
+        quarter_buys = load_quarter_zip(raw, cfg, skip_counts=skips)
+        counts = skips[0] if skips else SkipCounts()
+        print(f"form345 {label}: {len(quarter_buys)} buys, skips={counts}")
+        buys.extend(quarter_buys)
     return buys

@@ -2,7 +2,7 @@ from datetime import date
 from pathlib import Path
 
 from drifthunter.config import Form4Config
-from drifthunter.ingest.insider_datasets import load_quarter_dir
+from drifthunter.ingest.insider_datasets import SkipCounts, load_quarter_dir
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "form345"
 
@@ -65,3 +65,10 @@ def test_joint_filing_collapses_to_one_buy(tmp_path):
     assert ones[0].insider_name == "FUND GP LLC"
     assert ones[0].is_ceo_cfo is True          # CEO title on 1111111, CFO on 0999999
     assert ones[0].value == 30000.0            # counted once
+
+
+def test_unparseable_price_skipped_and_counted():
+    skips: list[SkipCounts] = []
+    buys = load_quarter_dir(FIXTURE_DIR, CFG, skip_counts=skips)
+    assert len(buys) == 3                      # blank-price row not loaded
+    assert skips[0].unparseable_value == 1

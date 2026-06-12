@@ -60,7 +60,9 @@ The process, in order:
 1. Write the spec, including the exact go/kill criteria, **before** building
    anything (the criteria are frozen in [`config.yaml`](config.yaml)'s `gate:`
    block and were applied unchanged — see the [runbook](docs/phase0-runbook.md)).
-2. Build the backtest engine (100 passing tests).
+2. Build the backtest engine (100 passing tests at the Phase 0 run; the
+   suite has since grown to 125 with the post-verdict fixes and figure
+   tooling).
 3. Run it once against 5 years of data.
 4. Accept the verdict — KILL — without retuning, reslicing, or
    benchmark-shopping until it looked better.

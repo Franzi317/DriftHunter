@@ -2,6 +2,13 @@
 
 Index URL pattern:
 https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{q}/form.idx
+
+EDGAR label transition: around December 2024, EDGAR renamed the
+Schedule 13D form-type label from "SC 13D" to "SCHEDULE 13D" (and
+"SC 13D/A" to "SCHEDULE 13D/A") as part of the amended 13D/G
+structured-data rules. The 2024q4 index contains both labels; 2025q1
+onward uses only the new label. Both labels are matched here and the
+original label is preserved in IndexRow.form_type.
 """
 from __future__ import annotations
 
@@ -30,14 +37,15 @@ class IndexRow:
 def parse_form_idx(text: str) -> list[IndexRow]:
     rows: list[IndexRow] = []
     for line in text.splitlines():
-        if not line.startswith("SC 13D "):  # trailing space: excludes 'SC 13D/A'
+        # trailing space: excludes 'SC 13D/A' and 'SCHEDULE 13D/A'
+        if not (line.startswith("SC 13D ") or line.startswith("SCHEDULE 13D ")):
             continue
         # columns separated by runs of 2+ spaces
         parts = re.split(r"\s{2,}", line.strip())
         if len(parts) < 5:
             continue
         form_type, name, cik, filed, path = parts[0], parts[1], parts[2], parts[3], parts[4]
-        if form_type != "SC 13D":
+        if form_type not in ("SC 13D", "SCHEDULE 13D"):
             continue
         rows.append(IndexRow(
             form_type=form_type,

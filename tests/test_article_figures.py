@@ -19,7 +19,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from article_figures import compute_horizon_summary, render_horizon_decay  # noqa: E402
+from article_figures import (  # noqa: E402
+    _build_decay_axes,
+    compute_horizon_summary,
+    render_horizon_decay,
+)
 
 
 def _make_events(profile: str, horizons: list[int], n: int,
@@ -183,6 +187,35 @@ def test_render_horizon_decay_creates_nonempty_png(tmp_path):
     summary = compute_horizon_summary(events_p0, events_s2)
 
     out_path = tmp_path / "f.png"
+    render_horizon_decay(summary, out_path)
+
+    assert out_path.exists()
+    assert out_path.stat().st_size > 0
+
+
+def test_sparse_summary_omits_absent_combo_bars(tmp_path):
+    """A (profile, horizon) combo absent from the summary must not render a
+    zero-height bar -- it should be omitted entirely. Build a sparse summary
+    with form4 at horizons [5, 10] and sc13d at horizon [5] only (3 combos
+    total, not the full 2x2=4), and assert the rendered axes has exactly 3
+    bars."""
+    events_p0 = pd.concat([
+        _make_events("form4", [5, 10], n=40, excess_mean=0.001, seed=1),
+        _make_events("sc13d", [5], n=40, excess_mean=-0.01, seed=2),
+    ], ignore_index=True)
+    events_s2 = events_p0.iloc[0:0]  # empty frame, correct schema
+
+    summary = compute_horizon_summary(events_p0, events_s2)
+
+    assert len(summary) == 3
+    assert set(zip(summary["profile"], summary["horizon"])) == {
+        ("form4", 5), ("form4", 10), ("sc13d", 5),
+    }
+
+    fig, ax = _build_decay_axes(summary)
+    assert len(ax.patches) == 3
+
+    out_path = tmp_path / "sparse.png"
     render_horizon_decay(summary, out_path)
 
     assert out_path.exists()

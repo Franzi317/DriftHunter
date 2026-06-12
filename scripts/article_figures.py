@@ -131,12 +131,22 @@ def compute_horizon_summary(events_p0: pd.DataFrame, events_s2: pd.DataFrame) ->
 # Rendering
 # ---------------------------------------------------------------------------
 
-def render_horizon_decay(summary: pd.DataFrame, out_path: Path) -> None:
-    """Grouped bar chart: mean excess return vs SPY (30bp costs) by holding
+def _build_decay_axes(summary: pd.DataFrame) -> tuple[plt.Figure, plt.Axes]:
+    """Build the Figure 2 (horizon decay) figure and axes.
+
+    Grouped bar chart: mean excess return vs SPY (30bp costs) by holding
     horizon, one bar group per profile, with asymmetric bootstrap CI
     whiskers. Horizons are ordered ascending and treated as categorical
     (evenly spaced on the x-axis regardless of their numeric spacing, so
-    5/10/20/40/60/125/250 don't visually compress the early horizons)."""
+    5/10/20/40/60/125/250 don't visually compress the early horizons).
+
+    A (profile, horizon) combination absent from `summary` is omitted
+    entirely -- no bar, no whisker -- rather than rendered as a
+    zero-height bar (which would be visually indistinguishable from a
+    measured ~0% mean with a tight CI). X positions are still derived
+    from the global sorted horizon list so bar groups stay aligned across
+    profiles.
+    """
     horizons = sorted(summary["horizon"].unique())
     profiles = [p for p in ("form4", "sc13d") if p in set(summary["profile"])]
     # Any profile not in the known pair still gets plotted (extra color).
@@ -148,6 +158,7 @@ def render_horizon_decay(summary: pd.DataFrame, out_path: Path) -> None:
     n_horizons = len(horizons)
     x = np.arange(n_horizons)
     bar_width = 0.8 / max(n_profiles, 1)
+    horizon_to_x = dict(zip(horizons, x))
 
     fig, ax = plt.subplots(figsize=(10, 5.5), dpi=160)
     fig.patch.set_facecolor("white")
@@ -155,25 +166,29 @@ def render_horizon_decay(summary: pd.DataFrame, out_path: Path) -> None:
 
     for i, profile in enumerate(profiles):
         prof_rows = summary[summary["profile"] == profile].set_index("horizon")
+        positions = []
         means = []
         err_lo = []
         err_hi = []
         for h in horizons:
-            if h in prof_rows.index:
-                row = prof_rows.loc[h]
-                mean = float(row["mean"])
-                lo = float(row["ci_lo"])
-                hi = float(row["ci_hi"])
-            else:
-                mean, lo, hi = 0.0, 0.0, 0.0
+            if h not in prof_rows.index:
+                continue
+            row = prof_rows.loc[h]
+            mean = float(row["mean"])
+            lo = float(row["ci_lo"])
+            hi = float(row["ci_hi"])
+            positions.append(horizon_to_x[h])
             means.append(mean)
             err_lo.append(max(mean - lo, 0.0))
             err_hi.append(max(hi - mean, 0.0))
 
+        if not positions:
+            continue
+
         offset = (i - (n_profiles - 1) / 2) * bar_width
         color = PROFILE_COLORS.get(profile, f"C{i}")
         ax.bar(
-            x + offset,
+            np.array(positions) + offset,
             means,
             width=bar_width * 0.9,
             label=profile,
@@ -208,6 +223,12 @@ def render_horizon_decay(summary: pd.DataFrame, out_path: Path) -> None:
     ax.spines["right"].set_visible(False)
 
     fig.tight_layout()
+    return fig, ax
+
+
+def render_horizon_decay(summary: pd.DataFrame, out_path: Path) -> None:
+    """Render Figure 2 (horizon decay) to `out_path` as a PNG."""
+    fig, _ax = _build_decay_axes(summary)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, facecolor="white")
     plt.close(fig)

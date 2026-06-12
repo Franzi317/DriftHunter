@@ -6,6 +6,8 @@ An event-driven SEC-filing backtest that killed its own strategy — by design.
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+**Read the full story: [The anatomy of a dead edge](docs/article.md)**
+
 ---
 
 ## The verdict, up front
@@ -18,23 +20,23 @@ No live trading system was built.
 
 Headline numbers (30bp round-trip cost, vs SPY, 2021-04-01 → 2026-03-31):
 
-**Form 4 cluster buys (n=4,651)**
+**Form 4 cluster buys (n=4,653)**
 
 | Horizon (days) | Mean excess | 95% CI | Pass |
 |---|---|---|---|
-| 5  | +0.04% | [-0.21%, +0.29%] | ❌ |
-| 10 | -0.03% | [-0.38%, +0.32%] | ❌ |
-| 20 | -0.50% | [-0.94%, -0.05%] | ❌ |
-| 40 | -1.27% | [-1.94%, -0.59%] | ❌ |
+| 5  | +0.03% | [-0.22%, +0.28%] | ❌ |
+| 10 | -0.04% | [-0.38%, +0.32%] | ❌ |
+| 20 | -0.51% | [-0.95%, -0.05%] | ❌ |
+| 40 | -1.28% | [-1.94%, -0.58%] | ❌ |
 
-**13D initiations (n=2,976)**
+**13D initiations (n=4,256)**
 
 | Horizon (days) | Mean excess | 95% CI | Pass |
 |---|---|---|---|
-| 5  | -1.60% | [-2.18%, -0.98%] | ❌ |
-| 10 | -2.17% | [-3.02%, -1.29%] | ❌ |
-| 20 | -2.48% | [-4.05%, -0.74%] | ❌ |
-| 40 | -7.31% | [-8.53%, -6.09%] | ❌ |
+| 5  | -1.87% | [-2.36%, -1.37%] | ❌ |
+| 10 | -2.60% | [-3.27%, -1.89%] | ❌ |
+| 20 | -3.07% | [-4.23%, -1.75%] | ❌ |
+| 40 | -7.44% | [-8.47%, -6.37%] | ❌ |
 
 Both profiles fail the gate at every horizon. Full tables, exclusion reasons,
 and per-horizon checks: [`data/report.md`](data/report.md). Run narrative,
@@ -88,16 +90,20 @@ Between the **last pre-filing close** and the **next-open entry** (the
 earliest fill this system's entry rule allows), prices already moved, on
 average, SPY-adjusted:
 
+![Event-time mean cumulative excess return vs SPY: the pop completes before the earliest possible next-open entry](docs/figures/event_time_excess.png)
+
+*See [the article](docs/article.md#the-autopsy) for the full event-time methodology, sample-size caveats, and what this figure does and doesn't show.*
+
 | Profile | Metric | N | Mean | 95% CI |
 |---|---|---|---|---|
-| Form 4 clusters | `missed_total` (pre-close → next open) | 5,739 | +2.86% | [+2.69%, +3.04%] |
-| 13D initiations | `missed_total` (pre-close → next open) | 4,641 | +1.67% | [+1.15%, +2.32%] |
+| Form 4 clusters | `missed_total` (pre-close → next open) | 5,741 | +2.86% | [+2.69%, +3.04%] |
+| 13D initiations | `missed_total` (pre-close → next open) | 6,779 | +1.60% | [+1.16%, +2.09%] |
 
 That entire move happens **before** a next-open entrant can be filled. After
 entry, the documented post-filing drift is essentially gone — mean excess
 returns are zero-to-negative against SPY at every horizon (see table above),
 and the same holds when the benchmark is swapped to IWM (small/mid-cap proxy):
-form4 averages -0.11% excess vs IWM across horizons, sc13d averages -2.59%.
+form4 averages -0.12% excess vs IWM across horizons, sc13d averages -3.24%.
 Switching benchmarks doesn't rescue either profile — this looks like a dead
 signal at this latency, not a regime-headwind artifact.
 
@@ -106,6 +112,12 @@ consumed before a daily-bar, next-open strategy can capture it.** Capturing
 it would require same-day-of-filing (intraday) entry, which this system
 deliberately does not attempt — intraday execution was an explicit
 out-of-scope decision from day one.
+
+The 13D sample above reflects a post-verdict ingestion fix to the EDGAR
+form-type parser (the 13D sample grew from 5,020 to 7,244 signals with all
+verdicts unchanged); see the article's
+["A bug found after the verdicts"](docs/article.md#a-bug-found-after-the-verdicts)
+for the full disclosure.
 
 ---
 
@@ -190,7 +202,7 @@ all EDGAR requests — requests with a placeholder address may be rate-limited
 or blocked.
 
 ```bash
-uv run pytest tests/ -q   # 100 passed, network-free
+uv run pytest tests/ -q   # 125 passed, network-free
 ```
 
 ---

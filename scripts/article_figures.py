@@ -195,6 +195,14 @@ def compute_event_time_curve(signals, price_frames: dict[str, pd.DataFrame],
     signal, sorted by (profile, offset). Columns: profile, offset,
     mean_cum_excess (mean over contributing signals), n (contributor count).
     (profile, offset) combinations with zero contributors are omitted.
+
+    Note on sample composition: `n` shrinks as |offset| grows, because
+    signals whose price history doesn't extend far enough (shorter-history
+    tickers, or signals near the start/end of the available price range)
+    drop out of the contributor set at large offsets. The curve is therefore
+    a cross-sectional average over a CHANGING SAMPLE at each offset, not a
+    fixed cohort tracked through time -- article captions referencing this
+    curve must disclose this.
     """
     offsets_list = list(offsets)
 
@@ -486,6 +494,11 @@ def main() -> None:
     # -----------------------------------------------------------------
     # Figure 1: event-time excess curve
     # -----------------------------------------------------------------
+    print(
+        "note: cache-hit pass assumes Study 2 ran with max horizon 250",
+        file=sys.stderr,
+    )
+
     from drifthunter.config import load_config
 
     # Reuse `study2_long_horizon`'s signal loading and provider stack
@@ -527,6 +540,16 @@ def main() -> None:
     event_time_path = REPO_ROOT / "docs" / "figures" / "event_time_excess.png"
     render_event_time(curve, event_time_path)
     print(f"Wrote {event_time_path}")
+
+    # Report sample-size (n) at a few representative offsets per profile, for
+    # the article caption (offset-0 and offset-60 n are required there).
+    report_offsets = [0, 1, 2, 10, 30, 60]
+    curve_by_key = curve.set_index(["profile", "offset"])["n"]
+    for profile in sorted(curve["profile"].unique()):
+        n_values = {
+            k: int(curve_by_key.get((profile, k), 0)) for k in report_offsets
+        }
+        print(f"n by offset for profile={profile}: {n_values}")
 
 
 if __name__ == "__main__":

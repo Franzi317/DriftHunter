@@ -67,3 +67,35 @@ this codebase is pointed at it.
       (price data is parquet-cached locally; derived results are permanent).
 - [x] Commit `data/report.md` + this runbook.
 - [x] Merge `feature/phase0-backtest` to master.
+
+## 2026-06-11 addendum — corrected 13D ingestion
+
+During pre-publication review the sc13d sample looked wrong: its long-horizon
+completed-event count was constant across horizons that should have shrunk.
+Investigation traced this to ingestion, not analysis. When the amended 13D/G
+rules took effect in December 2024, EDGAR renamed the Schedule 13D form-type
+label in the full-index from `SC 13D` to `SCHEDULE 13D`, and the index parser
+silently skipped the new label — roughly 1,900 initiations from December 2024
+through March 2026 never entered the sample.
+
+**Fix:** parser corrected to match both labels (commit `0390d2b`). Every
+analysis (Phase 0 gate, post-mortem diagnostics, Study 2) was re-run on the
+corrected sample under the **same pre-committed criteria — no gate threshold,
+spec, or criterion was modified.**
+
+**Before/after verdict (unchanged):** Phase 0 KILL/KILL (form4/sc13d); Study 2
+NO-SIGNAL/NO-SIGNAL. All four verdicts identical to the original run.
+
+**New headline sc13d figures (corrected run):**
+
+- Sample: 5,020 → 7,244 signals; completed Phase-0 events 2,976 → 4,256;
+  coverage 92.3% → 93.4%.
+- Phase 0 (30bp vs SPY): mean excess −1.87% (5d), −2.60% (10d), −3.07% (20d),
+  −7.44% (40d); all CIs entirely below zero.
+- Study 2 (vs SPY): −9.60% (60d), −20.32% (125d), −29.32% (250d).
+- form4 changed by +8 signals (a richer 13D subject-CIK map let a few more
+  form4 tickers pass the shared exchange filter); immaterial to the verdict.
+
+The committed reports (`data/report.md`, `data/diagnostics.md`,
+`data/study2-report.md`) and the article reflect this corrected run. The gate
+criteria were not modified — the correction could not become a re-tune.

@@ -7,22 +7,22 @@ Reasons: CI lo > 0; portfolio excess > 0; max DD < 25%
 
 | Horizon | N | Mean excess | 95% CI | Pos. years | Port. excess (ann.) | Max DD | Skipped (full book) | Pass |
 |---|---|---|---|---|---|---|---|---|
-| 5 | 4651 | +0.0004 | [-0.0021, +0.0029] | 3 | -14.95% | 49.88% | 718 | ❌ |
-| 10 | 4651 | -0.0003 | [-0.0038, +0.0032] | 2 | -2.57% | 48.56% | 2312 | ❌ |
-| 20 | 4651 | -0.0050 | [-0.0094, -0.0005] | 1 | -27.46% | 56.88% | 23 | ❌ |
-| 40 | 4651 | -0.0127 | [-0.0194, -0.0059] | 2 | -17.74% | 54.51% | 90 | ❌ |
+| 5 | 4653 | +0.0003 | [-0.0022, +0.0028] | 3 | -14.95% | 49.88% | 718 | ❌ |
+| 10 | 4653 | -0.0004 | [-0.0038, +0.0032] | 2 | -2.57% | 48.56% | 2312 | ❌ |
+| 20 | 4653 | -0.0051 | [-0.0095, -0.0005] | 1 | -27.46% | 56.88% | 23 | ❌ |
+| 40 | 4653 | -0.0128 | [-0.0194, -0.0058] | 2 | -17.74% | 54.51% | 90 | ❌ |
 
 ## Profile: sc13d — **KILL**
 
-Coverage: 92.3%
+Coverage: 93.4%
 Reasons: CI lo > 0; >=3 positive years; max DD < 25%
 
 | Horizon | N | Mean excess | 95% CI | Pos. years | Port. excess (ann.) | Max DD | Skipped (full book) | Pass |
 |---|---|---|---|---|---|---|---|---|
-| 5 | 2976 | -0.0160 | [-0.0218, -0.0098] | 1 | -28.82% | 77.02% | 332 | ❌ |
-| 10 | 2976 | -0.0217 | [-0.0302, -0.0129] | 1 | +0.99% | 52.52% | 1680 | ❌ |
-| 20 | 2976 | -0.0248 | [-0.0405, -0.0074] | 1 | +36.53% | 25.89% | 1970 | ❌ |
-| 40 | 2976 | -0.0731 | [-0.0853, -0.0609] | 0 | -21.73% | 57.31% | 681 | ❌ |
+| 5 | 4256 | -0.0187 | [-0.0236, -0.0137] | 1 | -40.32% | 89.47% | 332 | ❌ |
+| 10 | 4256 | -0.0260 | [-0.0327, -0.0189] | 1 | -14.88% | 72.92% | 2288 | ❌ |
+| 20 | 4256 | -0.0307 | [-0.0423, -0.0175] | 1 | +9.66% | 48.15% | 3086 | ❌ |
+| 40 | 4256 | -0.0744 | [-0.0847, -0.0637] | 0 | -23.83% | 71.19% | 681 | ❌ |
 
 > Max DD is computed on the REALIZED equity curve (positions held at cost
 > until exit); it understates true intra-position peak-to-trough drawdown.
@@ -35,7 +35,7 @@ Reasons: CI lo > 0; >=3 positive years; max DD < 25%
 
 ## Excluded events by reason
 
-- adv: 1459 events (776 tickers)
-- insufficient_history: 74 events (36 tickers)
-- min_price: 361 events (207 tickers)
-- no_prices: 792 events (370 tickers)
+- adv: 1704 events (898 tickers)
+- insufficient_history: 93 events (46 tickers)
+- min_price: 503 events (297 tickers)
+- no_prices: 818 events (384 tickers)

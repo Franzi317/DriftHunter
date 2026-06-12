@@ -27,14 +27,14 @@ IWM-relative mean at the same horizon is flagged prominently below.
 
 ## Profile: form4 -- **NO-SIGNAL**
 
-Signals: 6431. Coverage: 88.7% (threshold 80%).
+Signals: 6439. Coverage: 88.7% (threshold 80%).
 No horizon passed all five criteria.
 
 | Horizon | n | mean excess | 99% CI | floor | floor met | pos. vintage years | n>=min | CI99 lo>0 | IWM mean | IWM 99% CI |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 60 | 4601 | -1.97% | [-3.03%, -0.85%] | +1.0% | no | 2/6 | yes | no | -1.09% | [-2.16%, +0.01%] |
-| 125 | 4278 | -4.97% | [-6.58%, -3.27%] | +2.0% | no | 1/5 | yes | no | -2.53% | [-4.11%, -0.85%] |
-| 250 | 3772 | -10.34% | [-12.74%, -8.00%] | +3.0% | no | 1/5 | yes | no | -4.00% | [-6.35%, -1.70%] |
+| 60 | 4603 | -1.98% | [-3.06%, -0.87%] | +1.0% | no | 2/6 | yes | no | -1.10% | [-2.17%, -0.01%] |
+| 125 | 4280 | -4.97% | [-6.52%, -3.30%] | +2.0% | no | 1/5 | yes | no | -2.53% | [-4.06%, -0.85%] |
+| 250 | 3774 | -10.33% | [-12.66%, -7.95%] | +3.0% | no | 1/5 | yes | no | -3.99% | [-6.30%, -1.63%] |
 
 Per-horizon checks:
 
@@ -44,14 +44,14 @@ Per-horizon checks:
 
 ## Profile: sc13d -- **NO-SIGNAL**
 
-Signals: 5020. Coverage: 92.3% (threshold 80%).
+Signals: 7244. Coverage: 93.4% (threshold 80%).
 No horizon passed all five criteria.
 
 | Horizon | n | mean excess | 99% CI | floor | floor met | pos. vintage years | n>=min | CI99 lo>0 | IWM mean | IWM 99% CI |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 60 | 2976 | -11.19% | [-12.85%, -9.38%] | +1.0% | no | 0/4 | yes | no | -8.57% | [-10.21%, -6.81%] |
-| 125 | 2976 | -21.75% | [-23.90%, -19.55%] | +2.0% | no | 0/4 | yes | no | -16.39% | [-18.53%, -14.19%] |
-| 250 | 2976 | -31.60% | [-34.49%, -28.29%] | +3.0% | no | 0/4 | yes | no | -22.79% | [-25.66%, -19.47%] |
+| 60 | 4222 | -9.60% | [-11.62%, -7.35%] | +1.0% | no | 0/6 | yes | no | -8.02% | [-10.05%, -5.77%] |
+| 125 | 3920 | -20.32% | [-22.25%, -18.41%] | +2.0% | no | 0/5 | yes | no | -16.98% | [-18.89%, -15.07%] |
+| 250 | 3382 | -29.32% | [-32.31%, -26.24%] | +3.0% | no | 0/5 | yes | no | -22.22% | [-25.17%, -19.14%] |
 
 Per-horizon checks:
 

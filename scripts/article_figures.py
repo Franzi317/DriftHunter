@@ -18,9 +18,12 @@ bootstrap CI whiskers. Phase 0 horizons (5/10/20/40) use the pre-registered
 95% CI (alpha=0.05); Study 2 horizons (60/125/250) use the pre-registered 99%
 CI (alpha=0.01) per `docs/study2-long-horizon-insider.md`.
 
-Figure 1 (`event_time_excess.png`) is added by a later task in the article
-package plan; `main()` below is a scaffold that will be extended to produce
-it.
+Figure 1 (`event_time_excess.png`): event-time excess-return curve. For each
+signal, prices are anchored at the LAST CLOSE STRICTLY BEFORE trigger_date
+(no lookahead) and the cumulative SPY-adjusted excess return is tracked at a
+range of trading-day offsets relative to that anchor. `compute_event_time_curve`
+is a pure function (frame in, frame out); `render_event_time` is rendering
+only.
 
 Usage:
     uv run python scripts/article_figures.py
@@ -28,6 +31,7 @@ Usage:
 from __future__ import annotations
 
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import matplotlib
@@ -57,6 +61,18 @@ HEADLINE_COST_BPS = 30
 PHASE0_ALPHA = 0.05
 STUDY2_ALPHA = 0.01
 HORIZON_ALPHA_THRESHOLD = 60
+
+# Figure 1 price-fetch range. Mirrors `run_event_study`'s per-ticker range
+# computation (drifthunter/backtest/event_study.py: LOOKBACK_CAL_DAYS=60,
+# LOOKAHEAD_CAL_DAYS=90, end = max(triggers) + 90 + 2*max_horizon). We
+# deliberately use max_horizon=250 (Study 2's max, not the small offset
+# range used by `compute_event_time_curve`) so that the (ticker, start, end)
+# cache keys computed here are IDENTICAL to the ones `study2_long_horizon.py`
+# already populated -- this run becomes a pure cache-hit pass with no fresh
+# fetches, as long as Study 2 has been run at least once.
+EVENT_TIME_LOOKBACK_CAL_DAYS = 60
+EVENT_TIME_LOOKAHEAD_CAL_DAYS = 90
+EVENT_TIME_MAX_HORIZON = 250  # Study 2's max(HORIZONS); see docstring above.
 
 # Colorblind-safe pair (Wong, 2011): blue / vermillion.
 PROFILE_COLORS = {
@@ -125,6 +141,116 @@ def compute_horizon_summary(events_p0: pd.DataFrame, events_s2: pd.DataFrame) ->
     )
     summary = summary.sort_values(["profile", "horizon"]).reset_index(drop=True)
     return summary
+
+
+# Default offset range for Figure 1: 5 trading days before the anchor through
+# 60 trading days after.
+DEFAULT_EVENT_TIME_OFFSETS = range(-5, 61)
+
+
+def compute_event_time_curve(signals, price_frames: dict[str, pd.DataFrame],
+                              spy_frame: pd.DataFrame,
+                              offsets=DEFAULT_EVENT_TIME_OFFSETS) -> pd.DataFrame:
+    """Per (profile, offset) mean cumulative SPY-adjusted excess return in
+    event time, anchored at the last close STRICTLY BEFORE each signal's
+    trigger_date.
+
+    `signals` is a list of objects with `.profile`, `.ticker`,
+    `.trigger_date` attributes (e.g. `drifthunter.scorer.models.Signal`).
+    `price_frames` maps ticker -> daily frame (DatetimeIndex, columns
+    open/close/volume -- the standard provider output, sorted, deduped).
+    `spy_frame` is SPY's daily frame in the same schema, spanning at least
+    the union of all anchor and offset dates used below.
+
+    NO LOOKAHEAD: for each signal, `pre_pos` is the positional index of the
+    last row in that ticker's frame with a date strictly before
+    `trigger_date`. If no such row exists (the frame starts on or after
+    trigger_date), or the ticker is missing from `price_frames` or has an
+    empty frame, the signal is skipped entirely. The anchor close
+    `c0 = close[pre_pos]` and anchor date `d0 = index[pre_pos]` define event
+    time zero. If `d0` is not in `spy_frame`'s index, the signal is skipped
+    entirely (the SPY anchor return cannot be computed for any offset).
+
+    For each offset `k` in `offsets`, the target position is
+    `p = pre_pos + k`. If `p` is out of bounds for the ticker's frame
+    (`p < 0` or `p >= len(frame)`), this signal contributes NOTHING at offset
+    `k` -- no fill, no carry-forward. Otherwise the ticker-frame date at `p`
+    is looked up in `spy_frame`'s index; if it is missing there too, this
+    signal contributes nothing at offset `k` (skipped, not approximated).
+    Otherwise:
+
+        cum_excess_k = (close[p] / c0 - 1) - (spy_close[date_p] / spy_close[d0] - 1)
+
+    Offset 0 is the anchor row itself (`p == pre_pos`, `date_p == d0`), so
+    `cum_excess_0 = 0 - 0 = 0` for every contributing signal by construction
+    -- a sanity property of the output, not special-cased in this function.
+
+    Weekend/holiday triggers: `pre_pos` is simply the last trading day before
+    trigger_date, however many calendar days that is (e.g. a Monday
+    trigger_date anchors to the prior Friday's close). The filing-day close
+    then "collapses" into offset 1 (the next trading day after the anchor).
+    These signals are kept as-is -- no special handling.
+
+    Returns one row per (profile, offset) with at least one contributing
+    signal, sorted by (profile, offset). Columns: profile, offset,
+    mean_cum_excess (mean over contributing signals), n (contributor count).
+    (profile, offset) combinations with zero contributors are omitted.
+    """
+    offsets_list = list(offsets)
+
+    sums: dict[tuple[str, int], float] = {}
+    counts: dict[tuple[str, int], int] = {}
+
+    for sig in signals:
+        frame = price_frames.get(sig.ticker)
+        if frame is None or frame.empty:
+            continue
+
+        trigger_ts = pd.Timestamp(sig.trigger_date)
+        before = frame.index < trigger_ts
+        n_before = int(before.sum())
+        if n_before == 0:
+            continue
+        pre_pos = n_before - 1
+
+        d0 = frame.index[pre_pos]
+        if d0 not in spy_frame.index:
+            continue
+
+        c0 = float(frame["close"].iloc[pre_pos])
+        spy_c0 = float(spy_frame.loc[d0, "close"])
+
+        for k in offsets_list:
+            p = pre_pos + k
+            if p < 0 or p >= len(frame):
+                continue
+
+            date_p = frame.index[p]
+            if date_p not in spy_frame.index:
+                continue
+
+            c_p = float(frame["close"].iloc[p])
+            spy_c_p = float(spy_frame.loc[date_p, "close"])
+
+            cum_excess = (c_p / c0 - 1.0) - (spy_c_p / spy_c0 - 1.0)
+
+            key = (sig.profile, k)
+            sums[key] = sums.get(key, 0.0) + cum_excess
+            counts[key] = counts.get(key, 0) + 1
+
+    rows = [
+        {
+            "profile": profile,
+            "offset": offset,
+            "mean_cum_excess": sums[(profile, offset)] / counts[(profile, offset)],
+            "n": counts[(profile, offset)],
+        }
+        for (profile, offset) in sums
+    ]
+
+    curve = pd.DataFrame(rows, columns=["profile", "offset", "mean_cum_excess", "n"])
+    curve = curve.sort_values(["profile", "offset"]).reset_index(drop=True)
+    return curve
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +360,115 @@ def render_horizon_decay(summary: pd.DataFrame, out_path: Path) -> None:
     plt.close(fig)
 
 
+# x-position (in trading-day offsets) of the earliest possible next-open
+# entry: the filing-day close is offset 1, so the earliest open a
+# next-open strategy can transact at is the open of offset 2 -- the dashed
+# line sits at the midpoint (1.5) to visually separate "filing day" (<=1)
+# from "earliest tradeable entry" (>=2).
+NEXT_OPEN_ENTRY_X = 1.5
+
+
+def _build_event_time_axes(curve: pd.DataFrame) -> tuple[plt.Figure, plt.Axes]:
+    """Build the Figure 1 (event-time excess curve) figure and axes.
+
+    One line per profile (form4, sc13d), x = offset (trading days relative
+    to the last pre-filing close, offset 0), y = mean cumulative
+    SPY-adjusted excess return. A dashed vertical line at x=1.5 marks the
+    earliest possible next-open entry (offset 1 is the filing-day close;
+    offset 2 is the first open a next-open strategy could transact at).
+    Annotation label positions are derived from the curve's own values so
+    they track the data rather than risk overlapping it.
+    """
+    profiles = [p for p in ("form4", "sc13d") if p in set(curve["profile"])]
+    for p in sorted(curve["profile"].unique()):
+        if p not in profiles:
+            profiles.append(p)
+
+    fig, ax = plt.subplots(figsize=(10, 5.5), dpi=160)
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+
+    for i, profile in enumerate(profiles):
+        prof_rows = curve[curve["profile"] == profile].sort_values("offset")
+        if prof_rows.empty:
+            continue
+        color = PROFILE_COLORS.get(profile, f"C{i}")
+        ax.plot(
+            prof_rows["offset"], prof_rows["mean_cum_excess"],
+            label=profile, color=color, linewidth=1.8,
+        )
+
+    # Zero line.
+    ax.axhline(0.0, color="black", linewidth=1.0, zorder=0)
+
+    # Earliest possible next-open entry.
+    ax.axvline(NEXT_OPEN_ENTRY_X, color="#555555", linewidth=1.0, linestyle="--", zorder=0)
+
+    # Reserve a headroom band above the data for annotation text, so labels
+    # never overlap the plotted curves. Derived from the data's own y-range
+    # (not a hardcoded magic number that could clip or collide).
+    y_lo, y_hi = ax.get_ylim()
+    y_span = y_hi - y_lo
+    headroom = 0.12 * y_span
+    new_y_hi = y_hi + headroom
+    ax.set_ylim(y_lo, new_y_hi)
+    label_y = y_hi + headroom / 2.0  # vertical center of the headroom band
+
+    # "the pop": label in the headroom band, above the 0->2 step region.
+    pop_window = curve[(curve["offset"] >= 0) & (curve["offset"] <= 2)]
+    if not pop_window.empty:
+        pop_x = float(pop_window["offset"].mean())
+        ax.annotate(
+            "the pop",
+            xy=(pop_x, label_y),
+            ha="center", va="center", fontsize=9, color="#333333",
+        )
+
+    # "what a next-open strategy gets": label in the headroom band, over the
+    # region right of the entry line (right-aligned to the curve's right
+    # edge).
+    post_window = curve[curve["offset"] >= 2]
+    if not post_window.empty:
+        post_x = float(post_window["offset"].max())
+        ax.annotate(
+            "what a next-open strategy gets",
+            xy=(post_x, label_y),
+            ha="right", va="center", fontsize=9, color="#333333",
+        )
+
+    # Label for the vertical line itself, near the bottom of the axes (out
+    # of the way of both the curves and the headroom-band labels above).
+    ax.annotate(
+        "earliest possible next-open entry",
+        xy=(NEXT_OPEN_ENTRY_X, y_lo),
+        xytext=(NEXT_OPEN_ENTRY_X + 0.5, y_lo + 0.02 * y_span),
+        ha="left", va="bottom", fontsize=8, color="#555555",
+    )
+
+    ax.set_xlabel("Trading days from last pre-filing close")
+    ax.set_ylabel("Mean cumulative excess return vs SPY")
+    ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
+
+    # Pinned to the pre-anchor region (offsets < 0 are ~flat at zero by
+    # construction), away from the headroom-band annotations at the top and
+    # the post-entry curves to the right.
+    ax.legend(loc="center left", frameon=False)
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    fig.tight_layout()
+    return fig, ax
+
+
+def render_event_time(curve: pd.DataFrame, out_path: Path) -> None:
+    """Render Figure 1 (event-time excess curve) to `out_path` as a PNG."""
+    fig, _ax = _build_event_time_axes(curve)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, facecolor="white")
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -244,9 +479,54 @@ def main() -> None:
 
     summary = compute_horizon_summary(events_p0, events_s2)
 
-    out_path = REPO_ROOT / "docs" / "figures" / "horizon_decay.png"
-    render_horizon_decay(summary, out_path)
-    print(f"Wrote {out_path}")
+    decay_path = REPO_ROOT / "docs" / "figures" / "horizon_decay.png"
+    render_horizon_decay(summary, decay_path)
+    print(f"Wrote {decay_path}")
+
+    # -----------------------------------------------------------------
+    # Figure 1: event-time excess curve
+    # -----------------------------------------------------------------
+    from drifthunter.config import load_config
+
+    # Reuse `study2_long_horizon`'s signal loading and provider stack
+    # exactly -- same Signal reconstruction (so the same per-ticker
+    # grouping) and same SpyIwmFreeRoutingProvider (SPY routed to the free
+    # provider; cached reads need no API key).
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from study2_long_horizon import load_signals, make_provider  # noqa: E402
+
+    cfg = load_config(REPO_ROOT / "config.yaml")
+    signals = load_signals(cfg)
+    provider = make_provider(cfg)
+
+    # Per-ticker price ranges: SAME computation as run_event_study /
+    # study2_long_horizon, using Study 2's max_horizon (250) -- see
+    # EVENT_TIME_MAX_HORIZON docstring above for why. This makes the fetch
+    # below a cache-hit pass against the Study 2 cache.
+    by_ticker: dict[str, list] = {}
+    for sig in signals:
+        by_ticker.setdefault(sig.ticker, []).append(sig)
+
+    price_frames: dict[str, pd.DataFrame] = {}
+    ticker_ranges: dict[str, tuple] = {}
+    for ticker, sigs in by_ticker.items():
+        triggers = [s.trigger_date for s in sigs]
+        start = min(triggers) - timedelta(days=EVENT_TIME_LOOKBACK_CAL_DAYS)
+        end = max(triggers) + timedelta(
+            days=EVENT_TIME_LOOKAHEAD_CAL_DAYS + 2 * EVENT_TIME_MAX_HORIZON
+        )
+        ticker_ranges[ticker] = (start, end)
+        price_frames[ticker] = provider.daily(ticker, start, end)
+
+    global_start = min(s for s, _ in ticker_ranges.values())
+    global_end = max(e for _, e in ticker_ranges.values())
+    spy_frame = provider.daily("SPY", global_start, global_end)
+
+    curve = compute_event_time_curve(signals, price_frames, spy_frame)
+
+    event_time_path = REPO_ROOT / "docs" / "figures" / "event_time_excess.png"
+    render_event_time(curve, event_time_path)
+    print(f"Wrote {event_time_path}")
 
 
 if __name__ == "__main__":
